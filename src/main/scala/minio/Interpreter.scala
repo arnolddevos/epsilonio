@@ -1,6 +1,6 @@
 package minio
 
-trait Interpreter extends Structure with Synchronization with Signature {
+trait Interpreter extends Signature { this: Structure & Synchronization =>
 
   final class Fiber[+E, +A](ea: IO[E, A]) extends FiberOps[E, A] {
 

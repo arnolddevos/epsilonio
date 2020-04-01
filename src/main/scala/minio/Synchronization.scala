@@ -2,7 +2,7 @@ package minio
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.Queue
 
-trait Synchronization extends Signature {
+trait Synchronization { this: Signature =>
 
   final class Transactor[S](init: S) {
 

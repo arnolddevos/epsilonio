@@ -1,6 +1,6 @@
 package minio
 
-trait Structure extends Signature {
+trait Structure extends Signature { 
 
   enum IO[+E, +A] extends IOops[E, A] {
 
