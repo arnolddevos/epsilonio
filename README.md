@@ -1,4 +1,4 @@
-# minIO 
+# epsilonIO 
 
 An IO monad borrowing from flowlib and ZIO but with fewer features.  Highlights:
 
@@ -19,7 +19,7 @@ An IO monad borrowing from flowlib and ZIO but with fewer features.  Highlights:
 
 Here are some of the scala 3 features that might change how we do effects:
 
-* `enum` and GADT's.  These are safe and easy to use in scala 3. In this first iteration of minio, IO is implemented as `enum IO[+E, +A] { ... }` and the interpreter loops over a pattern match. The scala 3 type deductions are almost psychic.
+* `enum` and GADT's.  These are safe and easy to use in scala 3. In this first iteration, IO is implemented as `enum IO[+E, +A] { ... }` and the interpreter loops over a pattern match. The scala 3 type deductions are almost psychic.
 
 * `given` and context functions.  These provide the equivalent of a Reader monad. Perhaps they can supplant the environment features of ZIO.  Challenge: There is plenty of skepticism about any use of givens beyond coherent type classes.
 
@@ -30,8 +30,8 @@ Here are some of the scala 3 features that might change how we do effects:
 In the base directory of a dotty 0.23.0-RC1 project:
 
 ```sh
-git clone arnolddevos/minio
-echo '(unmanagedSourceDirectories in Compile) += baseDirectory.value / "minio/src/main/scala"' > minio.sbt
+git clone arnolddevos/epsilonio
+echo '(unmanagedSourceDirectories in Compile) += baseDirectory.value / "epsilonio/src/main/scala"' > epsilonio.sbt
 ```
 
 In scala code:
