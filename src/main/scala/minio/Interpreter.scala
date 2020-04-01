@@ -30,12 +30,16 @@ trait Interpreter extends Structure with Synchronization with Signature {
       yield ()
 
     def start: IO[Nothing, Unit] =
-      state.transact {
+      for {
+        ready <- state.transactTotal {
         _ match {
-          case Ready => Updated(Running, runToExit)
-          case _     => Observed(succeed(()))
+            case Ready => Updated(Running, true)
+            case _     => Observed(false)
+          }
         }
+        _ <- if(ready) runToExit else unit
       }
+      yield ()
 
     def adopt(cf: Fiber[Any, Any]): IO[Nothing, Unit] =
       state.transact {
