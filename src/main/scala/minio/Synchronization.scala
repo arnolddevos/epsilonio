@@ -88,7 +88,7 @@ trait Synchronization extends Signature {
     // V or signal
     def offer(i: Long) =
       state.transact { v =>
-        Updated(v+i, succeed(()))  
+        Updated(v+i, unit)  
       }
   }
 
@@ -108,7 +108,7 @@ trait Synchronization extends Signature {
 
     def offer(u: Unit) =
       state.transact { v => 
-        Updated(v + 1, succeed(()))
+        Updated(v + 1, unit)
       }
   }
 
@@ -127,8 +127,8 @@ trait Synchronization extends Signature {
     def offer(t: T) =
       state.transact {
         _ match {
-          case Some(_) => Observed(succeed(()))
-          case None    => Updated(Some(t), succeed(()))
+          case Some(_) => Observed(unit)
+          case None    => Updated(Some(t), unit)
         }
       } 
   }
@@ -145,7 +145,7 @@ trait Synchronization extends Signature {
 
     def offer(t: T) =
       state.transact { q =>
-        if( q.length < quota ) Updated(q.enqueue(t), succeed(()))
+        if( q.length < quota ) Updated(q.enqueue(t), unit)
         else Blocked
       }
   }

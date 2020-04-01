@@ -32,7 +32,7 @@ trait Interpreter extends Structure with Synchronization with Signature {
     def start: IO[Nothing, Unit] =
       for {
         ready <- state.transactTotal {
-        _ match {
+          _ match {
             case Ready => Updated(Running, true)
             case _     => Observed(false)
           }
@@ -44,8 +44,8 @@ trait Interpreter extends Structure with Synchronization with Signature {
     def adopt(cf: Fiber[Any, Any]): IO[Nothing, Unit] =
       state.transact {
         _ match {
-          case Ready|Running => Updated(Managing(cf :: Nil), succeed(()))
-          case Managing(cfs) => Updated(Managing(cf :: cfs), succeed(()))
+          case Ready|Running => Updated(Managing(cf :: Nil), unit)
+          case Managing(cfs) => Updated(Managing(cf :: cfs), unit)
           case Terminated(_) => Observed(cf.interrupt.map(_ => ()))
         }
       }
