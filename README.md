@@ -31,7 +31,7 @@ In the base directory of a dotty 0.23.0-RC1 project:
 
 ```sh
 git clone arnolddevos/minio
-echo '(unmanagedSourceDirectories in Compile) += baseDirectory.value / "flowlib/src/main/scala"' > minio.sbt
+echo '(unmanagedSourceDirectories in Compile) += baseDirectory.value / "minio/src/main/scala"' > minio.sbt
 ```
 
 In scala code:
