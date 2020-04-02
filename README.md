@@ -44,7 +44,7 @@ See `Signature.scala` for the complete API.
 
 ## Architecture
 
-The API is defined in `trait Signature { ... }`. The idea is that alternative implementations of one API can be tried.   
+The API is defined in `trait Signature { ... }`. The idea is that alternative implementations can be tried.   
 
 In this iteration, the implementation is spread over three traits `Structure`, `Interpreter` and `Synchronization`.  These are composed to form the `api` object.
 
@@ -74,8 +74,6 @@ The state of each `Fiber` and `Arbiter` is held in a `Transactor`. This is an as
 
 Operations on fibers and arbiters such as `fork`, `join` and `interrupt` are transactions.
 
-A transaction is modeled as a pure function on state which may return a new state and an effect. Or it may return the value `Blocked`.  
+A transaction is modeled as a pure function on state which may return a new state and a result effect. Or it may return the value `Blocked`.  Blocked transactions are retained in the transactor until they can produce an effect.
 
-Blocked transactions are retained in the transactor until they can produce an effect.
-
-When they do, the state of the transactor is updated atomically and the effect is run asynchronously. 
+The transactor provides `transact[E, A](tx: Transaction[IO[E, A]]): IO[E, A]`.  The returned effect submits the transaction, waits if it is blocked, and eventually completes with its result. At that point the transactor is updated atomically and its effect is run uninterrupted. 
