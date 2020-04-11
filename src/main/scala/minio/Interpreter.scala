@@ -179,6 +179,8 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
                 )
               )
 
+            case EffectSuspend(ea) => runCPS(masked, ea(), ke, ka)
+
             case Die(t)           => 
               runCPS(true, fiber.die(t()), _ => (), _ => ())
 
