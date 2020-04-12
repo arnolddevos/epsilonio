@@ -155,11 +155,13 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
       def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit = {
         if( masked || fiber.isAlive ) 
           ea match {
-            case Succeed(a)       => ka(a)
-            case Fail(e)          => ke(e)
-            case FlatMap(ex, f)   => runCPS(masked, ex, ke, x => runCPS(masked, f(x), ke, ka))
-            case CatchAll(xa, f)  => runCPS(masked, xa, x => runCPS(masked, f(x), ke, ka), ka)
-            case EffectTotal(a)   => ka(a())
+            case Succeed(a)        => ka(a)
+            case Fail(e)           => ke(e)
+            case FlatMap(ex, f)    => runCPS(masked, ex, ke, x => runCPS(masked, f(x), ke, ka))
+            case Map(ex, f)        => runCPS(masked, ex, ke, x => ka(f(x)))
+            case CatchAll(xa, f)   => runCPS(masked, xa, x => runCPS(masked, f(x), ke, ka), ka)
+            case EffectTotal(a)    => ka(a())
+            case EffectSuspend(ea) => runCPS(masked, ea(), ke, ka)
 
             case Effect(a)        => 
               try { ka(a()) } 
@@ -178,8 +180,6 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
                   catch { case e => runCPS(true, fiber.die(check(e)), _ => (), _ => ()) }
                 )
               )
-
-            case EffectSuspend(ea) => runCPS(masked, ea(), ke, ka)
 
             case Die(t)           => 
               runCPS(true, fiber.die(t()), _ => (), _ => ())

@@ -30,14 +30,16 @@ trait Structure extends Signature {
       }
       
     def catchAll[F, A1 >: A](f: E => IO[F, A1]): IO[F, A1] = CatchAll(this, f)
+    
     def map[B](f: A => B): IO[E, B] = 
       this match {
         case EffectTotal(a)   => EffectTotal(() => f(a()))
         case Map(x, g)        => Map(x, y => f(g(y)))
         case Succeed(a)       => Succeed(f(a))
         case Fail(e)          => Fail(e)
-        case _                => flatMap(a => Succeed(f(a)))
+        case _                => Map(this, f)
       }
+
     def mapError[E1](f: E => E1): IO[E1, A] = catchAll(e => fail(f(e)))
     def zip[E1 >: E, B](other: IO[E1, B]): IO[E1, (A, B)] = flatMap(a => other.map(b => (a, b)))
     def fold[B](f: E => B, g: A => B): IO[Nothing, B] = map(g).catchAll(e => succeed(f(e)))
