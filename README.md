@@ -50,13 +50,13 @@ In this iteration, the implementation is spread over three traits `Structure`, `
 
 ### Structure 
 
-Implements `IO` and its combinators and constructors.  
+Defines `IO` and its combinators and constructors.  
 
 An `enum IO[+E, +A] { ... }` is pure data structure. The computation it represents may eventually succeed with a value of `A` or fail with a value of `E`. Constructors include `effect` and `effectAsync` and combinators include `flatMap`, `zip` and `race`. 
 
 ### Interpreter
 
-Implements `Fiber` and `Runtime`. 
+Defines `Fiber` and `Runtime`. 
 
 A `Runtime` contains the logic to execute an effect and provides `unsafeRunAsync` and `unsafeRunSync`.  It depends on a `Platform` which, in this version, encapsulates a java `ForkJoinPool`. 
 
@@ -64,11 +64,11 @@ A `Fiber` represents a lightweight thread created from an effect by `fork`. Fibe
 
 Fiber operations include `join`, `await` and `interrupt`.  The semantics are intended to be the same as ZIO.
 
-Class `Arbiter` is not part of the API. An arbiter manages a group of fibers and implements the `race` operation.  
+Class `Arbiter` is not part of the API. An arbiter manages a group of fibers and provides the `race` operation.  
 
 ### Synchronization
 
-Implements `Transactor`. 
+Defines `Transactor`. 
 
 The state of each `Fiber` and `Arbiter` is held in a `Transactor`. This is an asynchronous variable that is modified by atomic `Transaction`s. 
 
