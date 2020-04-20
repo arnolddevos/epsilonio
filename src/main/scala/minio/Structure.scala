@@ -6,18 +6,21 @@ trait Structure extends Signature {
 
     case Succeed(a: A)
     case Fail(e: E)
+
     case EffectTotal(a: () => A)
     case Effect(a: () => A) extends IO[Throwable, A]
     case EffectBlocking(a: () => A) extends IO[Throwable, A]
     case EffectAsync(register: (IO[E, A] => Unit) => Any)
     case EffectSuspend(a: () => IO[E, A])
-    case Interrupt()
-    case Die(t: () => Throwable)
+
     case FlatMap[E, A, B](a: IO[E, A], f: A => IO[E, B]) extends IO[E, B]
     case Map[E, A, B](a: IO[E, A], f: A => B) extends IO[E, B]
     case CatchAll[E, A, F](e: IO[E, A], f: E => IO[F, A]) extends IO[F, A]
+
     case Fork(a: IO[E, A]) extends IO[Nothing, Fiber[E, A]]
     case Mask(a: IO[E, A])
+    case Interrupt()
+    case Die(t: () => Throwable)
 
     def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B] = 
       this match {
@@ -92,7 +95,6 @@ trait Structure extends Signature {
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] = suspense.flatMap(ea => ea)
   def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = flatten(effect(suspense))
   def effectSuspendTotal[E, A](suspense: => IO[E, A]): IO[E, A] = EffectSuspend(() => suspense)
-  def mask[E, A](ea: IO[E, A]): IO[E, A] = Mask(ea)
 
   def foreach[E, A, B](as: Iterable[A])(f: A => IO[E, B]): IO[E, List[B]] =
     as.foldRight[IO[E, List[B]]](succeed(Nil)) { (a, ebs) => 
@@ -105,6 +107,7 @@ trait Structure extends Signature {
 
   def interrupt: IO[Nothing, Nothing] = Interrupt()
   def die(t: => Throwable): IO[Nothing, Nothing] = Die(() => t)
+  def mask[E, A](ea: IO[E, A]): IO[E, A] = Mask(ea)
 
   enum Exit[+E, +A] extends ExitOps[E, A] {
 
