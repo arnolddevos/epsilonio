@@ -149,8 +149,10 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
 
       executeAsync(
         try { runCPS(false, fiber.start, _ => (), _ => ()) }
-        catch { case t => runCPS(true, fiber.die(check(t)), _ => (), _ => ()) }
+        catch { case t => fiberDie(t) }
       )
+
+      def fiberDie(t: Throwable) = runCPS(true, fiber.die(safex(t)), _ => (), _ => ())
 
       def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit = {
         if( masked || fiber.isAlive ) 
@@ -165,19 +167,19 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
 
             case Effect(a)        => 
               try { ka(a()) } 
-              catch { case e => ke(check(e)) }
+            catch { case e => ke(safex(e)) }
 
             case EffectBlocking(a)=> 
               executeBlocking(
                 try { ka(a()) } 
-                catch { case e => ke(check(e)) }
+                catch { case e => ke(safex(e)) }
               )
 
             case EffectAsync(k)   => 
               k( ea1 => 
                 executeAsync(
                   try { runCPS(masked, ea1, ke, ka) }
-                  catch { case e => runCPS(true, fiber.die(check(e)), _ => (), _ => ()) }
+                  catch { case t => fiberDie(t) }
                 )
               )
 
@@ -214,7 +216,7 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
       p.exchange(null)
     }
 
-    private def check(t: Throwable): Throwable = if(fatal(t)) shutdown(t) else t
+    private def safex(t: Throwable): Throwable = if(fatal(t)) shutdown(t) else t
   }
   
   lazy val defaultRuntime = new Runtime(Platform.default)
