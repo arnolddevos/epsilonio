@@ -21,6 +21,7 @@ trait Structure extends Signature {
     case Mask(a: IO[E, A])
     case Interrupt()
     case Die(t: () => Throwable)
+    case Check() extends IO[Nothing, Unit]
 
     def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B] = 
       this match {
@@ -95,7 +96,7 @@ trait Structure extends Signature {
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] = suspense.flatMap(ea => ea)
   def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = flatten(effect(suspense))
   def effectSuspendTotal[E, A](suspense: => IO[E, A]): IO[E, A] = EffectSuspend(() => suspense)
-
+  
   def foreach[E, A, B](as: Iterable[A])(f: A => IO[E, B]): IO[E, List[B]] =
     as.foldRight[IO[E, List[B]]](succeed(Nil)) { (a, ebs) => 
       for { 
@@ -108,6 +109,7 @@ trait Structure extends Signature {
   def interrupt: IO[Nothing, Nothing] = Interrupt()
   def die(t: => Throwable): IO[Nothing, Nothing] = Die(() => t)
   def mask[E, A](ea: IO[E, A]): IO[E, A] = Mask(ea)
+  def check: IO[Nothing, Unit] = Check()
 
   enum Exit[+E, +A] extends ExitOps[E, A] {
 

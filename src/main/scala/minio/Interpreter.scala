@@ -155,41 +155,43 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
       def fiberDie(t: Throwable) = runCPS(true, fiber.die(safex(t)), _ => (), _ => ())
 
       def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit = {
-        if( masked || fiber.isAlive ) 
-          ea match {
-            case Succeed(a)        => ka(a)
-            case Fail(e)           => ke(e)
-            case FlatMap(ex, f)    => runCPS(masked, ex, ke, x => runCPS(masked, f(x), ke, ka))
-            case Map(ex, f)        => runCPS(masked, ex, ke, x => ka(f(x)))
-            case CatchAll(xa, f)   => runCPS(masked, xa, x => runCPS(masked, f(x), ke, ka), ka)
-            case EffectTotal(a)    => ka(a())
-            case EffectSuspend(ea) => runCPS(masked, ea(), ke, ka)
+        ea match {
+          case Succeed(a)       => ka(a)
+          case Fail(e)          => ke(e)
+          case FlatMap(ex, f)   => runCPS(masked, ex, ke, x => runCPS(masked, f(x), ke, ka))
+          case Map(ex, f)       => runCPS(masked, ex, ke, x => ka(f(x)))
+          case CatchAll(xa, f)  => runCPS(masked, xa, x => runCPS(masked, f(x), ke, ka), ka)
+          case EffectTotal(a)   => ka(a())
+          case EffectSuspend(ea)=> runCPS(masked, ea(), ke, ka)
 
-            case Effect(a)        => 
-              try { ka(a()) } 
+          case Effect(a)        => 
+            try { ka(a()) } 
             catch { case e => ke(safex(e)) }
 
-            case EffectBlocking(a)=> 
+          case EffectBlocking(a)=> 
+            if( masked || fiber.isAlive ) 
               executeBlocking(
                 try { ka(a()) } 
                 catch { case e => ke(safex(e)) }
               )
 
-            case EffectAsync(k)   => 
-              k( ea1 => 
+          case EffectAsync(k)   => 
+            k( ea1 => 
+              if( masked || fiber.isAlive ) 
                 executeAsync(
                   try { runCPS(masked, ea1, ke, ka) }
                   catch { case t => fiberDie(t) }
                 )
-              )
+            )
 
-            case Die(t)           => 
-              runCPS(true, fiber.die(t()), _ => (), _ => ())
+          case Die(t)           => 
+            runCPS(true, fiber.die(t()), _ => (), _ => ())
 
-            case Interrupt()      => 
-              runCPS(true, fiber.interrupt, _ => (), _ => ())
-                
-            case Fork(ea)         => 
+          case Interrupt()      => 
+            runCPS(true, fiber.interrupt, _ => (), _ => ())
+              
+          case Fork(ea)         => 
+            if( masked || fiber.isAlive ) {
               val child = new Fiber(ea)
               runCPS(
                 true,
@@ -197,10 +199,18 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
                 _ => (), 
                 _ => { runFiber(child); ka(child) }
               )
-              
-            case Mask(ea)   =>
-              runCPS(true, ea, ke, ka) 
-          }
+            }
+
+          case Mask(ea)         =>
+            runCPS(true, ea, ke, ka) 
+
+          case Check()          =>
+            if( masked || fiber.isAlive ) 
+              executeAsync(
+                try { ka(()) }
+                catch { case t => fiberDie(t) }
+              )
+        }
       }
     }
 
