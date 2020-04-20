@@ -1,5 +1,7 @@
 package minio
 
+import scala.annotation.tailrec
+
 trait Interpreter extends Signature { this: Structure & Synchronization =>
 
   final class Fiber[+E, +A](ea: IO[E, A]) extends FiberOps[E, A] {
@@ -147,20 +149,23 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
 
     private def runFiber[E, A](fiber: Fiber[E, A]): Unit = {
 
-      executeAsync(
-        try { runCPS(false, fiber.start, _ => (), _ => ()) }
-        catch { case t => fiberDie(t) }
-      )
+      fiberCont(false, fiber.start, _ => (), _ => ())
+ 
+      def fiberCont[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit =
+        executeAsync(
+          try { runCPS(masked, ea, ke, ka) }
+          catch { case t => fiberDie(t) }
+        )
 
       def fiberDie(t: Throwable) = runCPS(true, fiber.die(safex(t)), _ => (), _ => ())
 
-      def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit = {
+      @tailrec def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit = {
         ea match {
           case Succeed(a)       => ka(a)
           case Fail(e)          => ke(e)
-          case FlatMap(ex, f)   => runCPS(masked, ex, ke, x => runCPS(masked, f(x), ke, ka))
+          case FlatMap(ex, f)   => runCPS(masked, ex, ke, x => fiberCont(masked, f(x), ke, ka))
           case Map(ex, f)       => runCPS(masked, ex, ke, x => ka(f(x)))
-          case CatchAll(xa, f)  => runCPS(masked, xa, x => runCPS(masked, f(x), ke, ka), ka)
+          case CatchAll(xa, f)  => runCPS(masked, xa, x => fiberCont(masked, f(x), ke, ka), ka)
           case EffectTotal(a)   => ka(a())
           case EffectSuspend(ea)=> runCPS(masked, ea(), ke, ka)
 
@@ -178,10 +183,7 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
           case EffectAsync(k)   => 
             k( ea1 => 
               if( masked || fiber.isAlive ) 
-                executeAsync(
-                  try { runCPS(masked, ea1, ke, ka) }
-                  catch { case t => fiberDie(t) }
-                )
+                fiberCont(masked, ea1, ke, ka)
             )
 
           case Die(t)           => 
