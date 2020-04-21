@@ -143,29 +143,48 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
     )
   }
 
+  enum Tail {
+    case Continue(tail: () => Tail)
+    case Stop
+
+    @tailrec 
+    final def run: Unit = 
+      this match {
+        case Continue(t) => t().run
+        case Stop        => ()
+      }
+  }
+
   class Runtime(platform: Platform) extends RuntimeOps {
     import IO._
     import platform._
 
     private def runFiber[E, A](fiber: Fiber[E, A]): Unit = {
 
-      fiberCont(false, fiber.start, _ => (), _ => ())
- 
-      def fiberCont[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit =
+      val ignore = (_: Any) => Tail.Stop
+
+      fiberContinue(false, fiber.start, ignore, ignore)
+
+      def fiberContinue[E, A](masked: Boolean, ea: IO[E, A], ke: E => Tail, ka: A => Tail): Unit =
         executeAsync(
-          try { runCPS(masked, ea, ke, ka) }
+          try { recurCPS(masked, ea, ke, ka).run }
           catch { case t => fiberDie(t) }
         )
 
-      def fiberDie(t: Throwable) = runCPS(true, fiber.die(safex(t)), _ => (), _ => ())
-
-      @tailrec def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Unit, ka: A => Unit): Unit = {
+      def fiberDie(t: Throwable): Unit = 
+        runCPS(true, fiber.die(safex(t)), ignore, ignore).run
+      
+      def recurCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Tail, ka: A => Tail): Tail =
+        Tail.Continue(() => runCPS(masked, ea, ke, ka))
+      
+      @tailrec 
+      def runCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Tail, ka: A => Tail): Tail = {
         ea match {
           case Succeed(a)       => ka(a)
           case Fail(e)          => ke(e)
-          case FlatMap(ex, f)   => runCPS(masked, ex, ke, x => fiberCont(masked, f(x), ke, ka))
+          case FlatMap(ex, f)   => runCPS(masked, ex, ke, x => recurCPS(masked, f(x), ke, ka))
           case Map(ex, f)       => runCPS(masked, ex, ke, x => ka(f(x)))
-          case CatchAll(xa, f)  => runCPS(masked, xa, x => fiberCont(masked, f(x), ke, ka), ka)
+          case CatchAll(xa, f)  => runCPS(masked, xa, x => recurCPS(masked, f(x), ke, ka), ka)
           case EffectTotal(a)   => ka(a())
           case EffectSuspend(ea)=> runCPS(masked, ea(), ke, ka)
 
@@ -176,21 +195,26 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
           case EffectBlocking(a)=> 
             if( masked || fiber.isAlive ) 
               executeBlocking(
-                try { ka(a()) } 
-                catch { case e => ke(safex(e)) }
+                try { ka(a()).run } 
+                catch { case e => ke(safex(e)).run }
               )
+            Tail.Stop
 
           case EffectAsync(k)   => 
-            k( ea1 => 
-              if( masked || fiber.isAlive ) 
-                fiberCont(masked, ea1, ke, ka)
-            )
+            if( masked || fiber.isAlive )
+              k( 
+                ea1 => 
+                  if( masked || fiber.isAlive ) 
+                    fiberContinue(masked, ea1, ke, ka)
+              )
+            Tail.Stop
 
           case Die(t)           => 
-            runCPS(true, fiber.die(t()), _ => (), _ => ())
+            fiberDie(t())
+            Tail.Stop
 
           case Interrupt()      => 
-            runCPS(true, fiber.interrupt, _ => (), _ => ())
+            runCPS(true, fiber.interrupt, ignore, ignore)
               
           case Fork(ea)         => 
             if( masked || fiber.isAlive ) {
@@ -198,10 +222,11 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
               runCPS(
                 true,
                 fiber.adopt(child), 
-                _ => (), 
+                ignore, 
                 _ => { runFiber(child); ka(child) }
               )
             }
+            else Tail.Stop
 
           case Mask(ea)         =>
             runCPS(true, ea, ke, ka) 
@@ -209,9 +234,10 @@ trait Interpreter extends Signature { this: Structure & Synchronization =>
           case Check()          =>
             if( masked || fiber.isAlive ) 
               executeAsync(
-                try { ka(()) }
+                try { ka(()).run }
                 catch { case t => fiberDie(t) }
               )
+            Tail.Stop
         }
       }
     }
