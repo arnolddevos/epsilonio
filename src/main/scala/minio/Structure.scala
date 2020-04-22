@@ -110,42 +110,4 @@ trait Structure extends Signature {
   def die(t: => Throwable): IO[Nothing, Nothing] = Die(() => t)
   def mask[E, A](ea: IO[E, A]): IO[E, A] = Mask(ea)
   def check: IO[Nothing, Unit] = Check()
-
-  enum Exit[+E, +A] extends ExitOps[E, A] {
-
-    case Succeed(a: A)
-    case Fail(e: E)
-    case Die(t: Throwable)
-    case Interrupt()
-
-    def propagate: IO[E, A] =
-      this match {
-        case Succeed(a) => succeed(a)
-        case Fail(e)    => fail(e)
-        case Interrupt()=> interrupt
-        case Die(t)     => die(t)
-    }
-
-    def flatMap[E1 >: E, B](f: A => Exit[E1, B]): Exit[E1, B] =
-      this match {
-        case Succeed(a) => f(a)
-        case Fail(e)    => Fail(e)
-        case Die(t)     => Die(t)
-        case Interrupt()=> Interrupt()
-      }
-
-    def map[B](f: A => B): Exit[E, B] = flatMap(a => Succeed(f(a)))
-
-    def option: Option[A] =
-      this match {
-        case Succeed(a) => Some(a)
-        case _          => None
-      }
-
-    def succeeded: Boolean =
-      this match {
-        case Succeed(_) => true
-        case _          => false
-      }
-  }
 }
