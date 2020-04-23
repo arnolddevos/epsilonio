@@ -60,9 +60,7 @@ An `enum IO[+E, +A] { ... }` is pure data structure. The computation it represen
 
 ### Interpreter
 
-Defines `Fiber` and `Runtime`. 
-
-The interpreter `Runtime` contains the logic to execute an effect data structure. It provides `unsafeRunAsync` and `unsafeRunSync`.  It depends on a `Platform` which, in this version, encapsulates a java `ForkJoinPool`. 
+Defines the logic to execute an effect data structure. 
 
 ### Direct
 
@@ -70,9 +68,11 @@ Defines `IO` and its combinators and constructors directly in terms of a trampol
 
 ### Fibers
 
-Defines `Fiber`.
+Defines `Fiber`, `Arbiter` and `Runtime`.
 
-A `Fiber` represents a lightweight thread created from an effect by `fork`. Fibers only exist at runtime. 
+A `Runtime` provides methods to run effects: `unsafeRunAsync` and `unsafeRunSync`.  It depends on a `Platform` which, in this version, encapsulates a java `ForkJoinPool`. 
+
+A `Fiber` represents a lightweight thread running an effect. Top level fibers are created by a `Runtime`. Child fibers are subsequently created by `fork`. 
 
 Fiber operations include `join`, `await` and `interrupt`.  The semantics are intended to be the same as ZIO.
 
@@ -82,10 +82,10 @@ Class `Arbiter` is not part of the API. An arbiter manages a group of fibers and
 
 Defines `Transactor`. 
 
-The state of each `Fiber` and `Arbiter` is held in a `Transactor`. This is an asynchronous variable that is modified by atomic `Transaction`s. 
+The state of each `Fiber` and `Arbiter` is held in a `Transactor[State]`. This is an asynchronous variable that is modified by atomic `Transaction`s. 
 
 Operations on fibers and arbiters such as `fork`, `join` and `interrupt` are transactions.
 
 A transaction is modeled as a pure function on state which may return a new state and a result effect. Or it may return the value `Blocked`.  Blocked transactions are retained in the transactor until they can produce an effect.
 
-The transactor provides `transact[E, A](tx: Transaction[IO[E, A]]): IO[E, A]`.  This effect embodies the state change and result effect. 
+The transactor provides `transact[E, A](tx: Transaction[State, IO[E, A]]): IO[E, A]`.  This effect embodies the state change and result effect. 
