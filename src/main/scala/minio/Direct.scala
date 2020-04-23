@@ -169,27 +169,13 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     def eval(ke: Nothing => Tail, ka: Unit => Tail): Tail =
       fiberContinue(unit, ke, ka)
   }
-
-  class Runtime(val platform: Platform) extends RuntimeOps {
-    def safex(t: Throwable): Throwable = 
-      if(platform.fatal(t)) platform.shutdown(t) else t
   
-    def unsafeRunAsync[E, A](ea: => IO[E, A])(k: Exit[E, A] => Any): Unit = {
-      val fiber = new Fiber(effectSuspendTotal(ea))
-      fiberContinue(fiber.start, ignore, ignore).run(fiber, this, InterruptsOn)
-      fiber.awaitNow(k)
-    }
-
-    def unsafeRunSync[E, A](ea: => IO[E, A]): Exit[E, A] = {
-      val p = new java.util.concurrent.Exchanger[Exit[E, A]]
-      unsafeRunAsync(ea)(p.exchange(_))
-      p.exchange(null)
-    }
-  }
-  
-  lazy val defaultRuntime = new Runtime(Platform.default)
+  lazy val defaultRuntime = new Runtime(Platform.default, runFiber)
 
   val ignore = (_: Any) => Stop
+
+  def runFiber(fb: Fiber[Any, Any], rt: Runtime ): Unit =
+    fiberContinue(fb.start, ignore, ignore).run(fb, rt, InterruptsOn)
 
   def fiberContinue[E, A](ea: IO[E, A], ke: E => Tail, ka: A => Tail) = Continue {
     (fb, rt, mask) =>
