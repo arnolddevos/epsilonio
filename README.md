@@ -44,9 +44,13 @@ See `Signature.scala` for the complete API.
 
 ## Architecture
 
-The API is defined in `trait Signature { ... }`. The idea is that alternative implementations can be tried.   
+The API is defined in `trait Signature { ... }`. The idea is that alternative implementations can be tried.   There are two implementations so far.
 
-In this iteration, the implementation is spread over three traits `Structure`, `Interpreter` and `Synchronization`.  These are composed to form the `api` object.
+* The `Structure` and `Interpreter` implementation realized in object `api1`. 
+
+* The `Direct` implementation realized in `api2`.
+
+These rely on common modules `Fibers` and `Synchronization`.  
 
 ### Structure 
 
@@ -58,7 +62,15 @@ An `enum IO[+E, +A] { ... }` is pure data structure. The computation it represen
 
 Defines `Fiber` and `Runtime`. 
 
-A `Runtime` contains the logic to execute an effect and provides `unsafeRunAsync` and `unsafeRunSync`.  It depends on a `Platform` which, in this version, encapsulates a java `ForkJoinPool`. 
+The interpreter `Runtime` contains the logic to execute an effect data structure. It provides `unsafeRunAsync` and `unsafeRunSync`.  It depends on a `Platform` which, in this version, encapsulates a java `ForkJoinPool`. 
+
+### Direct
+
+Defines `IO` and its combinators and constructors directly in terms of a trampoline data structure, `Tail`. An alternative to the foregoing approach.
+
+### Fibers
+
+Defines `Fiber`.
 
 A `Fiber` represents a lightweight thread created from an effect by `fork`. Fibers only exist at runtime. 
 
@@ -76,4 +88,4 @@ Operations on fibers and arbiters such as `fork`, `join` and `interrupt` are tra
 
 A transaction is modeled as a pure function on state which may return a new state and a result effect. Or it may return the value `Blocked`.  Blocked transactions are retained in the transactor until they can produce an effect.
 
-The transactor provides `transact[E, A](tx: Transaction[IO[E, A]]): IO[E, A]`.  The returned effect submits the transaction, waits if it is blocked, and eventually completes with its result. At that point the transactor is updated atomically and its effect is run uninterrupted. 
+The transactor provides `transact[E, A](tx: Transaction[IO[E, A]]): IO[E, A]`.  This effect embodies the state change and result effect. 
