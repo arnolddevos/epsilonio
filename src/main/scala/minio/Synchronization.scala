@@ -4,45 +4,44 @@ import scala.collection.immutable.Queue
 
 trait Synchronization { this: Signature =>
 
+  enum Status[+S, +T] {
+    case Updated(state: S, effect: T)
+    case Observed(effect: T)
+    case Blocked
+  }
+  import Status._
+
+  type Transaction[S, +T] = S => Status[S, T]
+
   final class Transactor[S](init: S) {
 
-    type Transaction[+T] = S => Status[T]
-
-    enum Status[+T] {
-      case Updated(state: S, effect: T)
-      case Observed(effect: T)
-      case Blocked
-    }
-
-    def transaction[T](tx: S => Status[T]): Transaction[T] = tx
+    def transaction[T](tx: S => Status[S, T]): Transaction[S, T] = tx
       
-    def transact[E, A](tx: Transaction[IO[E, A]]): IO[E, A] = 
+    def transact[E, A](tx: Transaction[S, IO[E, A]]): IO[E, A] = 
       mask(effectAsync[E, A](k => runJob(Job(tx, k))))
 
-    def transactTotal[A](tx: Transaction[A]): IO[Nothing, A] =
+    def transactTotal[A](tx: Transaction[S, A]): IO[Nothing, A] =
       mask(effectAsync[Nothing, A]( k => runJob(Job(tx, a => k(succeed(a))))))
 
     def poll: S = cell.get.state
 
-    def transactNow[T](tx: Transaction[T])(k: T => Any): Unit =
+    def transactNow[T](tx: Transaction[S, T])(k: T => Any): Unit =
       runJob(Job(tx, k))
   
     private trait Job {
       type T 
-      def phase1: S => Status[T]
+      def phase1: S => Status[S, T]
       def phase2: T => Any
     }
 
     private object Job {
-      def apply[T0](tx: S => Status[T0], k: T0 => Any) : Job = 
+      def apply[T0](tx: S => Status[S, T0], k: T0 => Any) : Job = 
         new Job {
           type T = T0
           val phase1 = tx
           val phase2 = k
         }
     }
-
-    import Status._
 
     private case class Cell(state: S, jobs: List[Job])
     private val cell = new AtomicReference(Cell(init, Nil))
@@ -76,7 +75,6 @@ trait Synchronization { this: Signature =>
 
   def semaphore(v0: Long) = new Gate[Long, Long] {
     private val state = new Transactor(v0)
-    import state.Status._
 
     // P or wait
     val take =
@@ -94,7 +92,6 @@ trait Synchronization { this: Signature =>
 
   def barrier() = new Gate[Unit, Long] {
     private val state = new Transactor(0l)
-    import state.Status._
 
     val take =
       for {
@@ -114,7 +111,6 @@ trait Synchronization { this: Signature =>
 
   def latch[T]() = new Gate[T, T] {
     private val state = new Transactor(None: Option[T])
-    import state.Status._
 
     val take =
       state.transact { 
@@ -135,7 +131,6 @@ trait Synchronization { this: Signature =>
 
   def queue[T](quota: Int) = new Gate[T, T] {
     private val state = new Transactor(Queue.empty[T])
-    import state.Status._
 
     val take =
       state.transact { q => 

@@ -13,9 +13,9 @@ trait Fibers extends Signature { this: Synchronization =>
 
     import FiberState._
     import Exit._
+    import Status._
 
     private val state = new Transactor[FiberState](Ready)
-    import state.Status._
 
     def isAlive = state.poll match { 
       case _: Terminated => false 
@@ -153,9 +153,9 @@ trait Fibers extends Signature { this: Synchronization =>
       case Complete(exit: Exit[E,A])
     }
     import State._
+    import Status._
 
     val accum = new Transactor(Pending(quota))
-    import accum.Status._
 
     private def signal(ex: Exit[E, A]) = accum.transaction(
       _ match {
