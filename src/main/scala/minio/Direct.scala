@@ -10,37 +10,37 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def eval(ke: E => Tail, ka: A => Tail): Tail
 
-    def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B] = new IO[E1, B] {
+    def flatMap[E1 >: E, B](f: A => IO[E1, B]) = new IO[E1, B] {
       def eval(ke: E1 => Tail, kb: B => Tail) = 
         parent.eval(ke, a => f(a).eval(ke, kb))
     }
 
-    def catchAll[F, A1 >: A](f: E => IO[F, A1]): IO[F, A1] = new IO[F, A1] {
+    def catchAll[F, A1 >: A](f: E => IO[F, A1]) = new IO[F, A1] {
       def eval(kf: F => Tail, ka: A1 => Tail): Tail = 
         parent.eval(e => f(e).eval(kf, ka), ka)
     }
 
-    def map[B](f: A => B): IO[E, B] = new IO[E, B] {
+    def map[B](f: A => B) = new IO[E, B] {
       def eval(ke: E => Tail, kb: B => Tail) = 
         parent.eval(ke, a => kb(f(a)))
     }
 
-    def mapError[F](f: E => F): IO[F, A] = new IO[F, A]{
+    def mapError[F](f: E => F) = new IO[F, A]{
       def eval(kf: F => Tail, ka: A => Tail): Tail = 
         parent.eval(e => kf(f(e)), ka)
     }
 
-    def zip[E1 >: E, B](other: IO[E1, B]): IO[E1, (A, B)] = new IO[E1, (A, B)] {
+    def zip[E1 >: E, B](other: IO[E1, B]) = new IO[E1, (A, B)] {
       def eval(ke: E1 => Tail, kab: ((A, B)) => Tail): Tail =
         parent.eval(ke, a => other.eval(ke, b => kab((a, b))))
     }
 
-    def fold[B](f: E => B, g: A => B): IO[Nothing, B] = new IO[Nothing, B] {
+    def fold[B](f: E => B, g: A => B) = new IO[Nothing, B] {
       def eval(kn: Nothing => Tail, kb: B => Tail): Tail =
         parent.eval(e => kb(f(e)), a => kb(g(a)))
     }
 
-    def fork: IO[Nothing, Fiber[E, A]] = new IO[Nothing, Fiber[E, A]] {
+    def fork = new IO[Nothing, Fiber[E, A]] {
       def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail): Tail = Continue {
         (fb, rt, mask) => 
           val child = new Fiber(parent)
@@ -98,7 +98,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     def eval(ke: Nothing => Tail, ka: A => Tail): Tail = ka(a)
   }
 
-  def effect[A](a: => A): IO[Throwable, A] = new IO[Throwable, A] {
+  def effect[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail): Tail = Continue {
       (_, rt, _) =>
         try { ka(a) }
@@ -106,7 +106,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
   }
 
-  def effectBlocking[A](a: => A): IO[Throwable, A] = new IO[Throwable, A] {
+  def effectBlocking[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail): Tail = Continue {
       (fb, rt, mask) =>
         rt.platform.executeBlocking(
@@ -117,7 +117,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
   }
 
-  def effectAsync[E, A](register: (IO[E, A] => Unit) => Any): IO[E, A] = new IO[E, A] {
+  def effectAsync[E, A](register: (IO[E, A] => Unit) => Any) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail): Tail = 
       Continue {
         (fb, rt, mask) =>
@@ -129,14 +129,14 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       }
   }
 
-  def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] = new IO[E, A] {
+  def flatten[E, A](suspense: IO[E, IO[E, A]]) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail): Tail =
       suspense.eval(ke, ea => ea.eval(ke, ka))
   }
 
   def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = flatten(effect(suspense))
 
-  def effectSuspendTotal[E, A](suspense: => IO[E, A]): IO[E, A] = new IO[E, A] {
+  def effectSuspendTotal[E, A](suspense: => IO[E, A]) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail): Tail = suspense.eval(ke, ka)
   }
   
@@ -149,23 +149,23 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       yield b :: bs
     }
 
-  def interrupt: IO[Nothing, Nothing] = new IO[Nothing, Nothing] {
+  def interrupt = new IO[Nothing, Nothing] {
     def eval(ke: Nothing => Tail, ka: Nothing => Tail): Tail = Continue(
       (fb, _, _) =>
         fb.interrupt.eval(ignore, ignore)
     )
   }
 
-  def die(t: => Throwable): IO[Nothing, Nothing] = new IO[Nothing, Nothing] {
+  def die(t: => Throwable) = new IO[Nothing, Nothing] {
     def eval(ke: Nothing => Tail, ka: Nothing => Tail): Tail = fiberDie(t)
   }
 
-  def mask[E, A](ea: IO[E, A]): IO[E, A] = new IO[E, A] {
+  def mask[E, A](ea: IO[E, A]) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail): Tail =
       WithMask(ea.eval(ke, ka))
   }
 
-  def check: IO[Nothing, Unit] = new IO[Nothing, Unit] {
+  def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail): Tail =
       fiberContinue(unit, ke, ka)
   }
@@ -202,7 +202,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def fiberDie(t: Throwable) = Continue(
     (fb, rt, _) =>
-      fb.die(rt.safex(t)).eval(ignore, ignore))
+      fb.die(rt.safex(t)).eval(ignore, ignore)
+  )
 
   enum Mask {
     case InterruptsOn
