@@ -168,7 +168,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail): Tail =
-      fiberContinue(unit, ke, ka)
+      Check(fiberContinue(unit, ke, ka))
   }
   
   lazy val defaultRuntime = new Runtime(Platform.default, runFiber)
@@ -199,18 +199,18 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     
   enum Tail {
     case Continue(step: (Fiber[Any, Any], Runtime, Mask) => Tail)
+    case Check(tail: Tail)
     case WithMask(tail: Tail)
     case Stop
 
     def run(fb: Fiber[Any, Any], rt: Runtime, mask: Mask): Unit = {
-
-      if(mask == InterruptsOff || fb.isAlive)
-        loop(mask, this)
-
       @tailrec 
       def loop(mask: Mask, next: Tail): Unit = 
         next match {
           case Continue(step)  => loop(mask, step(fb, rt, mask))
+          case Check(tail)     => 
+            if(mask == InterruptsOff || fb.isAlive)
+              loop(mask, tail)
           case WithMask(tail)  => loop(InterruptsOff, tail)
           case Stop            => ()
         }
