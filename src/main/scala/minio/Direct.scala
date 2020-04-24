@@ -45,7 +45,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
         (fb, rt, mask) => 
           val child = new Fiber(parent)
           fb.adopt(child).eval(ignore, _ => {
-            fiberContinue(child.start, ignore, ignore).run(child, rt, InterruptsOn)
+            runFiber(child, rt)
             ka(child)
           })
       }
@@ -134,7 +134,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       suspense.eval(ke, ea => ea.eval(ke, ka))
   }
 
-  def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = flatten(effect(suspense))
+  def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = 
+    flatten(effect(suspense))
 
   def effectSuspendTotal[E, A](suspense: => IO[E, A]) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail): Tail = suspense.eval(ke, ka)
@@ -213,10 +214,6 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
           case WithMask(tail)  => loop(InterruptsOff, tail)
           case Stop            => ()
         }
-        }
     }
   }
-
-
-  
 }
