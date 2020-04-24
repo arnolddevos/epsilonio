@@ -41,14 +41,17 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
 
     def fork = new IO[Nothing, Fiber[E, A]] {
-      def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail): Tail = Continue {
-        (fb, rt, mask) => 
-          val child = new Fiber(parent)
-          fb.adopt(child).eval(ignore, _ => {
-            runFiber(child, rt)
-            ka(child)
-          })
-      }
+      def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail): Tail = 
+        Check(
+          Continue {
+            (fb, rt, mask) => 
+              val child = new Fiber(parent)
+              fb.adopt(child).eval(ignore, _ => {
+                runFiber(child, rt)
+                ka(child)
+              })
+          }
+        )
     }
 
     def raceAll[E1 >: E, A1 >: A](others: Iterable[IO[E1, A1]]): IO[E1, A1] =
@@ -107,26 +110,31 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   }
 
   def effectBlocking[A](a: => A) = new IO[Throwable, A] {
-    def eval(kt: Throwable => Tail, ka: A => Tail): Tail = Continue {
-      (fb, rt, mask) =>
-        rt.platform.executeBlocking(
-          try { ka(a).run(fb, rt, mask) }
-          catch { case t => kt(rt.safex(t)).run(fb, rt, mask) }
-        )
-        Stop
-    }
+    def eval(kt: Throwable => Tail, ka: A => Tail): Tail = 
+      Check(
+        Continue {
+          (fb, rt, mask) =>
+            rt.platform.executeBlocking(
+              try { ka(a).run(fb, rt, mask) }
+              catch { case t => kt(rt.safex(t)).run(fb, rt, mask) }
+            )
+            Stop
+        }
+      )
   }
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail): Tail = 
-      Continue {
-        (fb, rt, mask) =>
-          register(
-            ea => 
-              fiberContinue(ea, ke, ka).run(fb, rt, mask)
-          )
-          Stop
-      }
+      Check(
+        Continue {
+          (fb, rt, mask) =>
+            register(
+              ea => 
+                Check(fiberContinue(ea, ke, ka)).run(fb, rt, mask)
+            )
+            Stop
+        }
+      )
   }
 
   def flatten[E, A](suspense: IO[E, IO[E, A]]) = new IO[E, A] {
