@@ -207,11 +207,12 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
         loop(mask, this)
 
       @tailrec 
-      def loop(mask: Mask, rec: Tail): Unit = 
-        this match {
-          case Continue(step)     => loop(mask, step(fb, rt, mask))
+      def loop(mask: Mask, next: Tail): Unit = 
+        next match {
+          case Continue(step)  => loop(mask, step(fb, rt, mask))
           case WithMask(tail)  => loop(InterruptsOff, tail)
-          case Stop               => ()
+          case Stop            => ()
+        }
         }
     }
   }
