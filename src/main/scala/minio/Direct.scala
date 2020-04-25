@@ -212,6 +212,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     case Stop
 
     def run(fb: Fiber[Any, Any], rt: Runtime, mask: Mask): Unit = {
+      loop(mask, this)
+      
       @tailrec 
       def loop(mask: Mask, next: Tail): Unit = 
         next match {
