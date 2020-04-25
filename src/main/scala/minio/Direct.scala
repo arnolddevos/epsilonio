@@ -12,7 +12,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def flatMap[E1 >: E, B](f: A => IO[E1, B]) = new IO[E1, B] {
       def eval(ke: E1 => Tail, kb: B => Tail) = 
-        parent.eval(ke, a => f(a).eval(ke, kb))
+        Tail(parent.eval(ke, a => f(a).eval(ke, kb)))
     }
 
     def catchAll[F, A1 >: A](f: E => IO[F, A1]) = new IO[F, A1] {
@@ -22,7 +22,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def map[B](f: A => B) = new IO[E, B] {
       def eval(ke: E => Tail, kb: B => Tail) = 
-        parent.eval(ke, a => kb(f(a)))
+        Tail(parent.eval(ke, a => kb(f(a))))
     }
 
     def mapError[F](f: E => F) = new IO[F, A]{
@@ -225,5 +225,9 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
           case Stop            => ()
         }
     }
+  }
+
+  object Tail {
+    def apply(tail: => Tail) = Continue((_, _, _) => tail)
   }
 }
