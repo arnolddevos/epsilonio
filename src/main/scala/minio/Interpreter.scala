@@ -66,12 +66,11 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
             
         case Fork(ea)         => 
           if( masked || fiber.isAlive ) {
-            val child = new Fiber(ea)
             runCPS(
               true,
-              fiber.adopt(child), 
+              fiber.fork(ea), 
               ignore, 
-              _ => { runFiber(child, rt); ka(child) }
+              child => { runFiber(child, rt); ka(child) }
             )
           }
           else Tail.Stop

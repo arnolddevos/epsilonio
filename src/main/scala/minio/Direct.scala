@@ -45,8 +45,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
         Check(
           Continue {
             (fb, rt, mask) => 
-              val child = new Fiber(parent)
-              fb.adopt(child).eval(ignore, _ => {
+              fb.fork(parent).eval(ignore, child => {
                 runFiber(child, rt)
                 ka(child)
               })
