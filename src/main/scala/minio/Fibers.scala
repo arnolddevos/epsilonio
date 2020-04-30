@@ -5,7 +5,6 @@ trait Fibers extends Signature { this: Synchronization =>
   final class Fiber[+E, +A](ea: IO[E, A]) extends FiberOps[E, A] {
 
     private enum FiberState {
-      case Ready
       case Running
       case Managing(children: List[Fiber[Any, Any]])
       case Terminated(ex: Exit[E, A])
@@ -15,29 +14,17 @@ trait Fibers extends Signature { this: Synchronization =>
     import Exit._
     import Status._
 
-    private val state = new Transactor(Ready)
+    private val state = new Transactor(Running)
 
     def isAlive = state.poll match { 
       case _: Terminated => false 
       case _ => true 
     }
 
-    private def runToExit =
+    def start: IO[Nothing, Unit] =
       for {
         x <- ea.fold(Fail(_), Succeed(_))
         _ <- exit(x)
-      }
-      yield ()
-
-    def start: IO[Nothing, Unit] =
-      for {
-        ready <- state.transactTotal {
-          _ match {
-            case Ready => Updated(Running, true)
-            case _     => Observed(false)
-          }
-        }
-        _ <- if(ready) runToExit else unit
       }
       yield ()
 
@@ -47,7 +34,7 @@ trait Fibers extends Signature { this: Synchronization =>
         _ match {
           case Running            => Updated(Managing(child :: Nil), succeed(child))
           case Managing(children) => Updated(Managing(child :: children), succeed(child))
-          case Ready|Terminated(_)=> Observed(child.interrupt.map(_ => child))
+          case Terminated(_)      => Observed(child.interrupt.map(_ => child))
         }
       }
     }
@@ -55,12 +42,10 @@ trait Fibers extends Signature { this: Synchronization =>
     private def exit(ex: Exit[E, A]): IO[Nothing, Exit[E, A]] =
       state.transact {
         _ match {
-          case Terminated(ex0) => 
-            Observed(succeed(ex0))
-          case Managing(cfs) => 
-            Updated(Terminated(ex), foreach(cfs)(_.interrupt).map(_ => ex))
-          case _ => 
-            Updated(Terminated(ex), succeed(ex) )
+          case Running            => Updated(Terminated(ex), succeed(ex) )
+          case Managing(children) => Updated(Terminated(ex), 
+                                        foreach(children)(_.interrupt).map(_ => ex))
+          case Terminated(ex0)    => Observed(succeed(ex0))
         }
       }
 
