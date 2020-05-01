@@ -173,8 +173,13 @@ trait Direct extends Signature with Execution { this: Fibers with Synchronizatio
       Check(fiberLive, Shift( Catch(() => ka(()), fiberDie )))
   }
   
-  lazy val defaultRuntime = new Runtime(Platform.default, (fiber, rt) =>
-    fiber.start.tail.run(fiber, rt.platform, Interrupts.On))
+  lazy val defaultRuntime = 
+    new Runtime(
+      Platform.default, 
+      (fiber, rt) =>
+        Shift(Catch(() => fiber.start.tail, fiberDie))
+          .run(fiber, rt.platform, Interrupts.On)
+    )
 }
 
 trait Execution {
