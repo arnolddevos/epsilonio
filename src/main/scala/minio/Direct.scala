@@ -1,55 +1,65 @@
 package minio
 import scala.annotation._
 
-trait Direct extends Signature { this: Fibers with Synchronization => 
-
+trait Direct extends Signature with Execution { this: Fibers with Synchronization => 
   import Tail._
-  import Mask._
-  
-  abstract class IO[+E, +A] extends IOops[E, A] { parent =>
+
+  type Context = Fiber[Any, Any]
+  val ignore    = (_: Any) => Stop
+  val fiberDie  = (t: Throwable) => Continue(_.die(t).tail)
+  val fiberLive = (f: Fiber[Any, Any]) => f.isAlive
+
+  abstract class IO[+E, +A] extends IOops[E, A] { self =>
 
     def eval(ke: E => Tail, ka: A => Tail): Tail
 
+    def tail = eval(ignore, ignore)
+
     def flatMap[E1 >: E, B](f: A => IO[E1, B]) = new IO[E1, B] {
       def eval(ke: E1 => Tail, kb: B => Tail) = 
-        Tail(parent.eval(ke, a => f(a).eval(ke, kb)))
+        Continue(_ => self.eval(ke, a => f(a).eval(ke, kb)))
     }
 
     def catchAll[F, A1 >: A](f: E => IO[F, A1]) = new IO[F, A1] {
       def eval(kf: F => Tail, ka: A1 => Tail) = 
-        parent.eval(e => f(e).eval(kf, ka), ka)
+        self.eval(e => f(e).eval(kf, ka), ka)
     }
 
     def map[B](f: A => B) = new IO[E, B] {
       def eval(ke: E => Tail, kb: B => Tail) = 
-        Tail(parent.eval(ke, a => kb(f(a))))
+        Continue(_ => self.eval(ke, a => kb(f(a))))
     }
 
     def mapError[F](f: E => F) = new IO[F, A]{
       def eval(kf: F => Tail, ka: A => Tail) = 
-        parent.eval(e => kf(f(e)), ka)
+        self.eval(e => kf(f(e)), ka)
     }
 
     def zip[E1 >: E, B](other: IO[E1, B]) = new IO[E1, (A, B)] {
       def eval(ke: E1 => Tail, kab: ((A, B)) => Tail) =
-        parent.eval(ke, a => other.eval(ke, b => kab((a, b))))
+        self.eval(ke, a => other.eval(ke, b => kab((a, b))))
     }
 
     def fold[B](f: E => B, g: A => B) = new IO[Nothing, B] {
       def eval(kn: Nothing => Tail, kb: B => Tail) =
-        parent.eval(e => kb(f(e)), a => kb(g(a)))
+        self.eval(e => kb(f(e)), a => kb(g(a)))
     }
 
     def fork = new IO[Nothing, Fiber[E, A]] {
       def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail) = 
-        Check(
-          Continue {
-            (fb, rt, mask) => 
-              fb.fork(parent).eval(ignore, child => {
-                runFiber(child, rt)
-                ka(child)
-              })
-          }
+        Check( 
+          fiberLive, 
+          Continue( 
+            _.fork(self).eval(
+                ignore, 
+                child => 
+                  Fork(
+                    child, 
+                    Shift(Catch(() => child.start.tail, fiberDie)), 
+                    ka(child)
+                  )
+            )
+          )
         )
     }
 
@@ -101,38 +111,27 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   }
 
   def effect[A](a: => A) = new IO[Throwable, A] {
-    def eval(kt: Throwable => Tail, ka: A => Tail) = Continue {
-      (_, rt, _) =>
-        try { ka(a) }
-        catch { case t => kt(rt.safex(t)) }
-    }
+    def eval(kt: Throwable => Tail, ka: A => Tail) = 
+      Catch(() => ka(a), kt)
   }
 
   def effectBlocking[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
-      Check(
-        Continue {
-          (fb, rt, mask) =>
-            rt.platform.executeBlocking(
-              try { ka(a).run(fb, rt, mask) }
-              catch { case t => kt(rt.safex(t)).run(fb, rt, mask) }
-            )
-            Stop
-        }
-      )
+      Check( fiberLive, Blocking( Catch(() => ka(a), kt)))
   }
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail) = 
-      Check(
-        Continue {
-          (fb, rt, mask) =>
-            register(
-              ea => 
-                Check(fiberContinue(ea, ke, ka)).run(fb, rt, mask)
+      Check( fiberLive, 
+        Async( resume => 
+          register( ea => 
+            resume(
+              Check( fiberLive, 
+                Shift(Catch(() => ea.eval(ke, ka), fiberDie))
+              )
             )
-            Stop
-        }
+          )
+        )
       )
   }
 
@@ -158,10 +157,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
 
   def interrupt = new IO[Nothing, Nothing] {
-    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Continue(
-      (fb, _, _) =>
-        fb.interrupt.eval(ignore, ignore)
-    )
+    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Continue( _.interrupt.tail )
   }
 
   def die(t: => Throwable) = new IO[Nothing, Nothing] {
@@ -169,64 +165,59 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   }
 
   def mask[E, A](ea: IO[E, A]) = new IO[E, A] {
-    def eval(ke: E => Tail, ka: A => Tail) =
-      WithMask(ea.eval(ke, ka))
+    def eval(ke: E => Tail, ka: A => Tail) = Mask(ea.eval(ke, ka))
   }
 
   def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail) =
-      Check(fiberContinue(unit, ke, ka))
+      Check(fiberLive, Shift( Catch(() => ka(()), fiberDie )))
   }
   
-  lazy val defaultRuntime = new Runtime(Platform.default, runFiber)
+  lazy val defaultRuntime = new Runtime(Platform.default, (fiber, rt) =>
+    fiber.start.tail.run(fiber, rt.platform, Interrupts.On))
+}
 
-  val ignore = (_: Any) => Stop
+trait Execution {
+  type Context
 
-  def runFiber(fb: Fiber[Any, Any], rt: Runtime ): Unit =
-    fiberContinue(fb.start, ignore, ignore).run(fb, rt, InterruptsOn)
-
-  def fiberContinue[E, A](ea: IO[E, A], ke: E => Tail, ka: A => Tail) = Continue {
-    (fb, rt, mask) =>
-      rt.platform.executeAsync(
-        try { ea.eval(ke, ka).run(fb, rt, mask) }
-        catch { case t => fiberDie(t).run(fb, rt, mask) }
-      )
-      Stop
-  }
-
-  def fiberDie(t: Throwable) = Continue(
-    (fb, rt, _) =>
-      fb.die(rt.safex(t)).eval(ignore, ignore)
-  )
-
-  enum Mask {
-    case InterruptsOn
-    case InterruptsOff
+  enum Interrupts {
+    case On
+    case Off
   }
     
   enum Tail {
-    case Continue(step: (Fiber[Any, Any], Runtime, Mask) => Tail)
-    case Check(tail: Tail)
-    case WithMask(tail: Tail)
+    case Continue(step: Context => Tail)
+    case Mask(tail: Tail)
+    case Check(live: Context => Boolean, tail: Tail)
+    case Fork(child: Context, start: Tail, tail: Tail)
+    case Async(linkage: (Tail => Unit) => Any)
+    case Blocking(tail: Tail)
+    case Shift(tail: Tail)
+    case Catch(tail: () => Tail, recover: Throwable => Tail)
     case Stop
 
-    def run(fb: Fiber[Any, Any], rt: Runtime, mask: Mask): Unit = {
+    def run(context: Context, platform: Platform, mask: Interrupts): Unit = {
       loop(mask, this)
 
       @tailrec 
-      def loop(mask: Mask, next: Tail): Unit = 
+      def loop(mask: Interrupts, next: Tail): Unit = 
         next match {
-          case Continue(step)  => loop(mask, step(fb, rt, mask))
-          case Check(tail)     => 
-            if(mask == InterruptsOff || fb.isAlive)
-              loop(mask, tail)
-          case WithMask(tail)  => loop(InterruptsOff, tail)
-          case Stop            => ()
+          case Continue(step)           => loop(mask, step(context))
+          case Mask(tail)               => loop(Interrupts.Off, tail)
+          case Check(live, tail)        => if(mask == Interrupts.Off || live(context)) loop(mask, tail)
+          case Fork(child, start, tail) => start.run(child, platform, Interrupts.On); loop(mask, tail)
+          case Async(linkage)           => linkage(tail => tail.run(context, platform, mask))
+          case Blocking(tail)           => platform.executeBlocking(tail.run(context, platform, mask))
+          case Shift(tail)              => platform.executeAsync(tail.run(context, platform, mask))
+          case Stop                     => ()
+
+          case Catch(tail, recover)     =>
+            try { tail().run(context, platform, mask) } 
+            catch { 
+              case t if platform.fatal(t) => platform.shutdown(t)
+              case t                      => loop(mask, recover(t))
+            }
         }
     }
-  }
-
-  object Tail {
-    def apply(tail: => Tail) = Continue((_, _, _) => tail)
   }
 }
