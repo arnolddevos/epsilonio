@@ -47,18 +47,15 @@ trait Direct extends Signature with Execution { this: Fibers with Synchronizatio
 
     def fork = new IO[Nothing, Fiber[E, A]] {
       def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail) = 
-        Check( 
-          fiberLive, 
-          Continue( 
-            _.fork(self).eval(
-                ignore, 
-                child => 
-                  Fork(
-                    child, 
-                    Shift(Catch(() => child.start.tail, fiberDie)), 
-                    ka(child)
-                  )
-            )
+        Continue( 
+          _.fork(self).eval(
+              ignore, 
+              child => 
+                Fork(
+                  child, 
+                  CheckShift(fiberLive, () => child.start.tail, fiberDie),
+                  ka(child)
+                )
           )
         )
     }
@@ -126,9 +123,7 @@ trait Direct extends Signature with Execution { this: Fibers with Synchronizatio
         Async( resume => 
           register( ea => 
             resume(
-              Check( fiberLive, 
-                Shift(Catch(() => ea.eval(ke, ka), fiberDie))
-              )
+              CheckShift( fiberLive, () => ea.eval(ke, ka), fiberDie)
             )
           )
         )
@@ -170,7 +165,7 @@ trait Direct extends Signature with Execution { this: Fibers with Synchronizatio
 
   def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail) =
-      Check(fiberLive, Shift( Catch(() => ka(()), fiberDie )))
+      CheckShift(fiberLive, () => ka(()), fiberDie )
   }
   
   lazy val defaultRuntime = 
@@ -198,6 +193,7 @@ trait Execution {
     case Async(linkage: (Tail => Unit) => Any)
     case Blocking(tail: Tail)
     case Shift(tail: Tail)
+    case CheckShift(live: Context => Boolean, tail: () => Tail, recover: Throwable => Tail)
     case Catch(tail: () => Tail, recover: Throwable => Tail)
     case Stop
 
@@ -222,6 +218,16 @@ trait Execution {
               case t if platform.fatal(t) => platform.shutdown(t)
               case t                      => loop(mask, recover(t))
             }
+
+          case CheckShift(live, tail, recover) =>
+            if(mask == Interrupts.Off || live(context)) 
+              platform.executeAsync(
+                try { tail().run(context, platform, mask) } 
+                catch { 
+                  case t if platform.fatal(t) => platform.shutdown(t)
+                  case t                      => recover(t).run(context, platform, mask)
+                }
+              )
         }
     }
   }
