@@ -36,7 +36,7 @@ object Platform {
               true
             }
           }
-        executeAsync(managedBlock(blocker))
+        managedBlock(blocker)
       }
     }
 }
