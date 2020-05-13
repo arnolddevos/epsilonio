@@ -1,15 +1,11 @@
 package minio
 import scala.annotation._
-
-enum Interrupts {
-  case On
-  case Off
-}
-  
+ 
 enum Tail[-A] {
   case Continue(step: A => Tail[A])
   case ContraMap[A, B](f: A => B, tail: Tail[B]) extends Tail[A]
   case Mask(tail: Tail[A])
+  case Unmask(tail: Tail[A])
   case Check(live: A => Boolean, tail: Tail[A])
   case Fork[A, B](child: B, start: Tail[B], tail: Tail[A]) extends Tail[A]
   case Async(linkage: (Tail[A] => Unit) => Any)
@@ -23,36 +19,37 @@ enum Tail[-A] {
 object Tail {
 
   def run(tail: Tail[Any], platform: Platform): Unit = {
-    loop((), Interrupts.On, tail)
+    loop((), 0, tail)
 
-    def rentry[A](a: A, mask: Interrupts, next: Tail[A]): Unit = loop(a, mask, next)
+    def rentry[A](a: A, masks: Int, next: Tail[A]): Unit = loop(a, masks, next)
 
     @tailrec 
-    def loop[A](a: A, mask: Interrupts, next: Tail[A]): Unit = {
+    def loop[A](a: A, masks: Int, next: Tail[A]): Unit = {
 
       def attempt(tail: () => Tail[A], recover: Throwable => Tail[A]): Unit =
-        try rentry(a, mask, tail()) 
+        try rentry(a, masks, tail()) 
         catch {
           case t if platform.fatal(t) => platform.shutdown(t)
-          case t                      => rentry(a, mask, recover(t))
+          case t                      => rentry(a, masks, recover(t))
       }
 
       next match {
 
-        case Continue(step)           => loop(a, mask, step(a))
-        case ContraMap(f, tail)       => loop(f(a), mask, tail)
-        case Mask(tail)               => loop(a, Interrupts.Off, tail)
-        case Check(live, tail)        => if(mask == Interrupts.Off || live(a)) loop(a, mask, tail)
-        case Fork(child, start, tail) => rentry(child, Interrupts.On, start); loop(a, mask, tail)
+        case Continue(step)           => loop(a, masks, step(a))
+        case ContraMap(f, tail)       => loop(f(a), masks, tail)
+        case Mask(tail)               => loop(a, masks+1, tail)
+        case Unmask(tail)             => loop(a, masks-1, tail)
+        case Check(live, tail)        => if(masks > 0 || live(a)) loop(a, masks, tail)
+        case Fork(child, start, tail) => rentry(child, 0, start); loop(a, masks, tail)
 
-        case Async(linkage)           => linkage(rentry(a, mask, _))
-        case Blocking(tail)           => platform.executeBlocking(rentry(a, mask, tail))
-        case Shift(tail)              => platform.executeAsync(rentry(a, mask, tail))
+        case Async(linkage)           => linkage(rentry(a, masks, _))
+        case Blocking(tail)           => platform.executeBlocking(rentry(a, masks, tail))
+        case Shift(tail)              => platform.executeAsync(rentry(a, masks, tail))
         case Catch(tail, recover)     => attempt(tail, recover)
         case Stop                     => ()
 
         case CheckShift(live, tail, recover) =>
-          if(mask == Interrupts.Off || live(a)) 
+          if(masks > 0 || live(a)) 
             platform.executeAsync(attempt(tail, recover))
       }
     }

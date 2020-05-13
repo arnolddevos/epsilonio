@@ -160,7 +160,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   }
 
   def mask[E, A](ea: IO[E, A]) = new IO[E, A] {
-    def eval(ke: E => Tail, ka: A => Tail) = Mask(ea.eval(ke, ka))
+    def eval(ke: E => Tail, ka: A => Tail) = Mask(ea.eval(e => Unmask(ke(e)), a => Unmask(ka(a))))
   }
 
   def check = new IO[Nothing, Unit] {
