@@ -1,12 +1,12 @@
 package minio
 import scala.annotation._
 
-trait Direct extends Signature with Execution { this: Fibers with Synchronization => 
+trait Direct extends Signature { this: Fibers with Synchronization => 
   import Tail._
 
-  type Context = Fiber[Any, Any]
+  type Tail     = minio.Tail[Fiber[Any, Any]]
   val ignore    = (_: Any) => Stop
-  val fiberDie  = (t: Throwable) => Continue(_.die(t).tail)
+  val fiberDie  = (t: Throwable) => Continue((f: Fiber[Any, Any]) => f.die(t).tail)
   val fiberLive = (f: Fiber[Any, Any]) => f.isAlive
 
   abstract class IO[+E, +A] extends IOops[E, A] { self =>
@@ -175,60 +175,4 @@ trait Direct extends Signature with Execution { this: Fibers with Synchronizatio
         Shift(Catch(() => fiber.start.tail, fiberDie))
           .run(fiber, rt.platform, Interrupts.On)
     )
-}
-
-trait Execution {
-  type Context
-
-  enum Interrupts {
-    case On
-    case Off
-  }
-    
-  enum Tail {
-    case Continue(step: Context => Tail)
-    case Mask(tail: Tail)
-    case Check(live: Context => Boolean, tail: Tail)
-    case Fork(child: Context, start: Tail, tail: Tail)
-    case Async(linkage: (Tail => Unit) => Any)
-    case Blocking(tail: Tail)
-    case Shift(tail: Tail)
-    case CheckShift(live: Context => Boolean, tail: () => Tail, recover: Throwable => Tail)
-    case Catch(tail: () => Tail, recover: Throwable => Tail)
-    case Stop
-
-    def run(context: Context, platform: Platform, mask: Interrupts): Unit = {
-      loop(mask, this)
-
-      @tailrec 
-      def loop(mask: Interrupts, next: Tail): Unit = 
-        next match {
-          case Continue(step)           => loop(mask, step(context))
-          case Mask(tail)               => loop(Interrupts.Off, tail)
-          case Check(live, tail)        => if(mask == Interrupts.Off || live(context)) loop(mask, tail)
-          case Fork(child, start, tail) => start.run(child, platform, Interrupts.On); loop(mask, tail)
-          case Async(linkage)           => linkage(tail => tail.run(context, platform, mask))
-          case Blocking(tail)           => platform.executeBlocking(tail.run(context, platform, mask))
-          case Shift(tail)              => platform.executeAsync(tail.run(context, platform, mask))
-          case Stop                     => ()
-
-          case Catch(tail, recover)     =>
-            try { tail().run(context, platform, mask) } 
-            catch { 
-              case t if platform.fatal(t) => platform.shutdown(t)
-              case t                      => loop(mask, recover(t))
-            }
-
-          case CheckShift(live, tail, recover) =>
-            if(mask == Interrupts.Off || live(context)) 
-              platform.executeAsync(
-                try { tail().run(context, platform, mask) } 
-                catch { 
-                  case t if platform.fatal(t) => platform.shutdown(t)
-                  case t                      => recover(t).run(context, platform, mask)
-                }
-              )
-        }
-    }
-  }
 }
