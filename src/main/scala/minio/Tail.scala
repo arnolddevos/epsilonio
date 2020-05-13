@@ -18,40 +18,43 @@ enum Tail[-A] {
   case CheckShift(live: A => Boolean, tail: () => Tail[A], recover: Throwable => Tail[A])
   case Catch(tail: () => Tail[A], recover: Throwable => Tail[A])
   case Stop
+}
 
-  def run(a: A, platform: Platform, mask: Interrupts): Unit = {
-    loop(a, mask, this)
+object Tail {
+
+  def run(tail: Tail[Any], platform: Platform): Unit = {
+    loop((), Interrupts.On, tail)
+
+    def rentry[A](a: A, mask: Interrupts, next: Tail[A]): Unit = loop(a, mask, next)
 
     @tailrec 
-    def loop[A](a: A, mask: Interrupts, next: Tail[A]): Unit = 
+    def loop[A](a: A, mask: Interrupts, next: Tail[A]): Unit = {
+
+      def attempt(tail: () => Tail[A], recover: Throwable => Tail[A]): Unit =
+        try rentry(a, mask, tail()) 
+        catch {
+          case t if platform.fatal(t) => platform.shutdown(t)
+          case t                      => rentry(a, mask, recover(t))
+      }
+
       next match {
 
         case Continue(step)           => loop(a, mask, step(a))
         case ContraMap(f, tail)       => loop(f(a), mask, tail)
         case Mask(tail)               => loop(a, Interrupts.Off, tail)
         case Check(live, tail)        => if(mask == Interrupts.Off || live(a)) loop(a, mask, tail)
-        case Fork(child, start, tail) => start.run(child, platform, Interrupts.On); loop(a, mask, tail)
-        case Async(linkage)           => linkage(tail => tail.run(a, platform, mask))
-        case Blocking(tail)           => platform.executeBlocking(tail.run(a, platform, mask))
-        case Shift(tail)              => platform.executeAsync(tail.run(a, platform, mask))
-        case Stop                     => ()
+        case Fork(child, start, tail) => rentry(child, Interrupts.On, start); loop(a, mask, tail)
 
-        case Catch(tail, recover)     =>
-          try { tail().run(a, platform, mask) } 
-          catch { 
-            case t if platform.fatal(t) => platform.shutdown(t)
-            case t                      => loop(a, mask, recover(t))
-          }
+        case Async(linkage)           => linkage(rentry(a, mask, _))
+        case Blocking(tail)           => platform.executeBlocking(rentry(a, mask, tail))
+        case Shift(tail)              => platform.executeAsync(rentry(a, mask, tail))
+        case Catch(tail, recover)     => attempt(tail, recover)
+        case Stop                     => ()
 
         case CheckShift(live, tail, recover) =>
           if(mask == Interrupts.Off || live(a)) 
-            platform.executeAsync(
-              try { tail().run(a, platform, mask) } 
-              catch { 
-                case t if platform.fatal(t) => platform.shutdown(t)
-                case t                      => recover(t).run(a, platform, mask)
-              }
-            )
+            platform.executeAsync(attempt(tail, recover))
       }
+    }
   }
 }

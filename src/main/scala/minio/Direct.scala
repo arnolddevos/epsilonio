@@ -167,12 +167,14 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     def eval(ke: Nothing => Tail, ka: Unit => Tail) =
       CheckShift(fiberLive, () => ka(()), fiberDie )
   }
-  
-  lazy val defaultRuntime = 
-    new Runtime(
-      Platform.default, 
-      (fiber, rt) =>
-        Shift(Catch(() => fiber.start.tail, fiberDie))
-          .run(fiber, rt.platform, Interrupts.On)
-    )
+
+  lazy val defaultRuntime = {
+    def bootstrap(fiber: Fiber[Any, Any]) =
+      Fork(fiber, Shift(Catch(() => fiber.start.tail, fiberDie)), Stop)
+
+    def runFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
+      Tail.run(bootstrap(fiber), runtime.platform)
+
+    new Runtime( Platform.default, runFiber(_, _))
+  }
 }
