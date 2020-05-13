@@ -6,8 +6,12 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   type Tail     = minio.Tail[Fiber[Any, Any]]
   val ignore    = (_: Any) => Stop
-  val fiberDie  = (t: Throwable) => Continue((f: Fiber[Any, Any]) => f.die(t).tail)
-  val fiberLive = (f: Fiber[Any, Any]) => f.isAlive
+  
+  val fiberDie  = (t: Throwable) => 
+    Continue((fiber: Fiber[Any, Any]) => fiber.die(t).tail)
+  def fiberStart(fiber: Fiber[Any, Any]) = 
+    Context(fiber, _.isAlive, fiberDie, Shift(fiber.start.tail))
+
 
   abstract class IO[+E, +A] extends IOops[E, A] { self =>
 
@@ -47,15 +51,11 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def fork = new IO[Nothing, Fiber[E, A]] {
       def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail) = 
-        Continue( 
-          _.fork(self).eval(
-              ignore, 
-              child => 
-                Fork(
-                  child, 
-                  CheckShift(fiberLive, () => child.start.tail, fiberDie),
-                  ka(child)
-                )
+        Check(
+          Continue( 
+            _.fork(self).eval( ignore, 
+                child => Fork( fiberStart(child), ka(child))
+            )
           )
         )
     }
@@ -109,21 +109,21 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def effect[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
-      Catch(() => ka(a), kt)
+      Catch(() => a, ka, kt)
   }
 
   def effectBlocking[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
-      Check( fiberLive, Blocking( Catch(() => ka(a), kt)))
+      Check( Blocking( Catch(() => a, a => CheckShift(ka(a)), t => CheckShift(kt(t)))))
   }
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail) = 
-      Check( fiberLive, 
+      Check( 
         Async( resume => 
           register( ea => 
             resume(
-              CheckShift( fiberLive, () => ea.eval(ke, ka), fiberDie)
+              CheckShift( ea.eval(ke, ka))
             )
           )
         )
@@ -165,16 +165,13 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail) =
-      CheckShift(fiberLive, () => ka(()), fiberDie )
+      CheckShift(ka(()))
   }
 
   lazy val defaultRuntime = {
-    def bootstrap(fiber: Fiber[Any, Any]) =
-      Fork(fiber, Shift(Catch(() => fiber.start.tail, fiberDie)), Stop)
+    def runTopLevelFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
+      Tail.run(fiberStart(fiber), runtime.platform)
 
-    def runFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
-      Tail.run(bootstrap(fiber), runtime.platform)
-
-    new Runtime( Platform.default, runFiber(_, _))
+    new Runtime( Platform.default, runTopLevelFiber(_, _))
   }
 }
