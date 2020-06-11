@@ -6,12 +6,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   type Tail     = minio.Tail[Fiber[Any, Any]]
   val ignore    = (_: Any) => Stop
-  
-  val fiberDie  = (t: Throwable) => 
-    Continue((fiber: Fiber[Any, Any]) => fiber.die(t).tail)
-  def fiberStart(fiber: Fiber[Any, Any]) = 
-    Context(fiber, _.isAlive, fiberDie, Shift(fiber.start.tail))
-
+  val fiberDie  = (t: Throwable) => Access((fiber: Fiber[Any, Any]) => fiber.die(t).tail)
+  val fiberLive = (fiber: Fiber[Any, Any]) => fiber.isAlive
 
   abstract class IO[+E, +A] extends IOops[E, A] { self =>
 
@@ -21,7 +17,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def flatMap[E1 >: E, B](f: A => IO[E1, B]) = new IO[E1, B] {
       def eval(ke: E1 => Tail, kb: B => Tail) = 
-        Continue(_ => self.eval(ke, a => f(a).eval(ke, kb)))
+        lazily(self.eval(ke, a => f(a).eval(ke, kb)))
     }
 
     def catchAll[F, A1 >: A](f: E => IO[F, A1]) = new IO[F, A1] {
@@ -31,7 +27,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def map[B](f: A => B) = new IO[E, B] {
       def eval(ke: E => Tail, kb: B => Tail) = 
-        Continue(_ => self.eval(ke, a => kb(f(a))))
+        lazily(self.eval(ke, a => kb(f(a))))
     }
 
     def mapError[F](f: E => F) = new IO[F, A]{
@@ -51,10 +47,12 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def fork = new IO[Nothing, Fiber[E, A]] {
       def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail) = 
-        Check(
-          Continue( 
+        Check(fiberLive, 
+          Access( 
             _.fork(self).eval( ignore, 
-                child => Fork( fiberStart(child), ka(child))
+                child => Fork( 
+                  Shift(child.start.tail, fiberDie).provide(child), 
+                  ka(child))
             )
           )
         )
@@ -114,16 +112,20 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def effectBlocking[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
-      Check( Blocking( Catch(() => a, a => CheckShift(ka(a)), t => CheckShift(kt(t)))))
+      Check( fiberLive, 
+        Blocking( 
+          Catch(() => a, 
+            a => Check(fiberLive, Shift(ka(a), fiberDie)), 
+            t => Shift(kt(t), fiberDie))))
   }
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail) = 
-      Check( 
+      Check( fiberLive, 
         Async( resume => 
           register( ea => 
             resume(
-              CheckShift( ea.eval(ke, ka))
+              Check(fiberLive, Shift(ea.eval(ke, ka), fiberDie))
             )
           )
         )
@@ -138,9 +140,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = 
     flatten(effect(suspense))
 
-  def effectSuspendTotal[E, A](suspense: => IO[E, A]) = new IO[E, A] {
-    def eval(ke: E => Tail, ka: A => Tail) = suspense.eval(ke, ka)
-  }
+  def effectSuspendTotal[E, A](suspense: => IO[E, A]) = 
+    flatten(effectTotal(suspense))
   
   def foreach[E, A, B](as: Iterable[A])(f: A => IO[E, B]): IO[E, List[B]] =
     as.foldRight[IO[E, List[B]]](succeed(Nil)) { (a, ebs) => 
@@ -152,7 +153,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
 
   def interrupt = new IO[Nothing, Nothing] {
-    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Continue( _.interrupt.tail )
+    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access( _.interrupt.tail )
   }
 
   def die(t: => Throwable) = new IO[Nothing, Nothing] {
@@ -165,12 +166,12 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail) =
-      CheckShift(ka(()))
+      Check( fiberLive, Shift(ka(()), fiberDie))
   }
 
   lazy val defaultRuntime = {
     def runTopLevelFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
-      Tail.run(fiberStart(fiber), runtime.platform)
+      Tail.run(Shift(fiber.start.tail, fiberDie).provide(fiber), runtime.platform)
 
     new Runtime( Platform.default, runTopLevelFiber(_, _))
   }
