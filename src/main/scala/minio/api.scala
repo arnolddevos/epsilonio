@@ -6,7 +6,8 @@ val api1: Signature & Synchronization = new
         Fibers with 
         Synchronization {}
 
-val api2: Signature & Synchronization = new 
+val api2: Signature & Synchronization & Timing = new 
         Direct with 
         Fibers with 
+        Timing with
         Synchronization {}
