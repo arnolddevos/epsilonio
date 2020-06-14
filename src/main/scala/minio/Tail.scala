@@ -8,7 +8,7 @@ enum Tail[-A] {
   case Mask(tail: Tail[A])
   case Unmask(tail: Tail[A])
   case Check(live: A => Boolean, tail: Tail[A])
-  case Fork(child: Tail[Any], tail: Tail[A]) extends Tail[A]
+  case Fork(child: Tail[A], tail: Tail[A]) extends Tail[A]
   case Async(linkage: (Tail[A] => Unit) => Any)
   case Blocking(tail: Tail[A])
   case Shift(tail: Tail[A], fail: Throwable => Tail[A])
@@ -57,7 +57,7 @@ object Tail {
         case Unmask(tail)       =>  loop(a, masks-1, tail)
         case Check(live, tail)  =>  if(masks > 0 || live(a)) 
                                       loop(a, masks, tail)
-        case Fork(child, tail)  =>  run(child, platform)
+        case Fork(child, tail)  =>  reenter(a, 0, child)
                                     loop(a, masks, tail)
         case Async(linkage)     =>  linkage(reenter(a, masks, _))
         case Blocking(tail)     =>  platform.executeBlocking(reenter(a, masks, tail))
