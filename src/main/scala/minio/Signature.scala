@@ -39,6 +39,7 @@ trait Signature {
     final def either: IO[Nothing, Either[E, A]] = fold(Left(_), Right(_))
     final def option: IO[Nothing, Option[A]] = fold(_ => None, Some(_))
     final def unit: IO[E, Unit] = map(_ => ())
+    final def as[B](b: B): IO[E, B] = map(_ => b)
     final def andThen[E1 >: E, B](other: IO[E1, B]): IO[E1, B] = flatMap(_ => other)
 
     def fork: IO[Nothing, Fiber[E, A]]

@@ -34,7 +34,7 @@ trait Fibers extends Signature { this: Synchronization =>
         _ match {
           case Running            => Updated(Managing(child :: Nil), succeed(child))
           case Managing(children) => Updated(Managing(child :: children), succeed(child))
-          case Terminated(_)      => Observed(child.interrupt.map(_ => child))
+          case Terminated(_)      => Observed(child.interrupt.as(child))
         }
       }
     }
@@ -44,7 +44,7 @@ trait Fibers extends Signature { this: Synchronization =>
         _ match {
           case Running            => Updated(Terminated(ex), succeed(ex) )
           case Managing(children) => Updated(Terminated(ex), 
-                                        foreach(children)(_.interrupt).map(_ => ex))
+                                        foreach(children)(_.interrupt).as(ex))
           case Terminated(ex0)    => Observed(succeed(ex0))
         }
       }
