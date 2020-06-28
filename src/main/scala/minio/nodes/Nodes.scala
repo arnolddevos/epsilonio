@@ -4,7 +4,6 @@ package nodes
 import api2._
 import scala.concurrent.duration._
 
-
 /**
 * A node in a dataflow graph.  
 */
@@ -15,78 +14,6 @@ sealed trait Node {
 }
 
 /**
-* An unsupervised node that does not allow for failure.  
-*/
-trait Unsupervised extends Node {
-  type Failure = Nothing
-  final def start: IO[Nothing, Fiber[Nothing, Unit]] = action.fork
-}
-
-/**
-* A supervised node that reports start and finish supervisory events.  
-*/
-trait Supervised[E] extends Node {
-  type Failure = E
-
-  def supervisor: Supervisory[E] => IO[Nothing, Unit]
-
-  final def start: IO[Nothing, Fiber[E, Unit]] = {
-    import Supervisory._
-
-    def monitor(fiber: Fiber[E, Unit]) =
-      for {
-        ex <- fiber.await
-        _  <- supervisor(Stopped(this, fiber, ex))
-      }
-      yield ()
-
-    for {
-      fiber <- action.fork
-      _     <- supervisor(Started(this, fiber))
-      _     <- monitor(fiber).fork
-    }
-    yield fiber
-  }
-}
-
-
-/**
-* A node that accepts input.  
-*/
-trait Input[A] { this: Node =>
-
-  def input: IO[Nothing, A]
-
-  final def react[E]( step: A => IO[E, Unit]): IO[E, Unit] = 
-    input.flatMap(step)
-
-  final def reactWithin[E](amount: Duration)(step: Option[A] => IO[E, Unit]): IO[E, Unit] =
-    input.map(Some(_)).race(delay(amount).as(None)).flatMap(step)
-
-}
-
-/**
-* A node that accepts an alternative input.  
-*/
-trait Wye[A] {  this: Node => 
-  def wye: IO[Nothing, A]
-}
-
-/**
-* A node that produces output.  
-*/
-trait Output[A] { this: Node => 
-  def output: A => IO[Nothing, Unit]
-}
-
-/**
-* A node that produces an alternative output.  
-*/
-trait Tee[A] {  this: Node => 
-  def tee: A => IO[Nothing, Unit]
-}
-
-/**
 * A message to a supervisor node.
 */
 enum Supervisory[+E] {
@@ -94,29 +21,110 @@ enum Supervisory[+E] {
   case Stopped(node: Node, fiber: Fiber[E, Unit], exit: Exit[E, Unit])
 }
 
-/**
-* A top level supervisor node.
-*/
-trait Supervisor[E] extends Unsupervised with Input[Supervisory[E]]
+package template {
+  /**
+  * An unsupervised node that does not allow for failure.  
+  */
+  trait Unsupervised extends Node {
+    type Failure = Nothing
+    final def start: IO[Nothing, Fiber[Nothing, Unit]] = action.fork
+  }
 
+  /**
+  * A supervised node that reports start and finish supervisory events.  
+  */
+  trait Supervised[E] extends Node {
+    type Failure = E
+
+    def supervisor: Supervisory[E] => IO[Nothing, Unit]
+
+    final def start: IO[Nothing, Fiber[E, Unit]] = {
+      import Supervisory._
+
+      def monitor(fiber: Fiber[E, Unit]) =
+        for {
+          ex <- fiber.await
+          _  <- supervisor(Stopped(this, fiber, ex))
+        }
+        yield ()
+
+      for {
+        fiber <- action.fork
+        _     <- supervisor(Started(this, fiber))
+        _     <- monitor(fiber).fork
+      }
+      yield fiber
+    }
+  }
+
+  /**
+  * A node that accepts input.  
+  */
+  trait Input[A] { this: Node =>
+
+    def input: IO[Nothing, A]
+
+    final def react[E]( step: A => IO[E, Unit]): IO[E, Unit] = 
+      input.flatMap(step)
+
+    final def reactWithin[E](amount: Duration)(step: Option[A] => IO[E, Unit]): IO[E, Unit] =
+      input.map(Some(_)).race(delay(amount).as(None)).flatMap(step)
+
+  }
+
+  /**
+  * A node that accepts an alternative input.  
+  */
+  trait Wye[A] {  this: Node => 
+    def wye: IO[Nothing, A]
+  }
+
+  /**
+  * A node that produces output.  
+  */
+  trait Output[A] { this: Node => 
+    def output: A => IO[Nothing, Unit]
+  }
+
+  /**
+  * A node that produces an alternative output.  
+  */
+  trait Tee[A] {  this: Node => 
+    def tee: A => IO[Nothing, Unit]
+  }
+
+  /**
+  * A top level supervisor node.
+  */
+  trait Supervisor[E] extends Unsupervised with Input[Supervisory[E]]
+}
 
 package wiring {
 
-  trait Supervised[G : Out[Supervisory[E]], E](g: G) extends nodes.Supervised[E] { this: Node =>
+  trait Supervised[G : Out[Supervisory[E]], E](g: G) extends template.Supervised[E] { this: Node =>
     val supervisor = g.output
   }
-  trait Input[G : In[A], A](g: G) extends nodes.Input[A] { this: Node =>
+
+  trait Input[G : In[A], A](g: G) extends template.Input[A] { this: Node =>
     val input = g.input
   }
-  trait Wye[G : In[A], A](g: G) extends nodes.Wye[A] { this: Node =>
+
+  trait Wye[G : In[A], A](g: G) extends template.Wye[A] { this: Node =>
     val wye = g.input
   }
-  trait Output[G : Out[A], A](g: G) extends nodes.Output[A] { this: Node =>
+
+  trait Output[G : Out[A], A](g: G) extends template.Output[A] { this: Node =>
     val output = g.output
   }
-  trait Tee[G : Out[A], A](g: G) extends nodes.Tee[A] { this: Node =>
+
+  trait Tee[G : Out[A], A](g: G) extends template.Tee[A] { this: Node =>
     val tee = g.output
   }
+
+  trait Supervisor[G : In[Supervisory[A]], A](g: G) extends template.Supervisor[A] { this: Node =>
+    val input = g.input
+  }
+  
   trait Name(name: String) { this: Node =>
     override def toString  = name
   }

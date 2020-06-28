@@ -1,8 +1,8 @@
 package minio.playground
 
 import minio.api2._
-import minio.nodes.wiring._
-import minio.nodes.{Supervisory, Supervisor, Node}
+import minio.nodes._
+import wiring._
 
 val stage1, stage2 = queue[String](10)
 val errors = queue[Supervisory[Throwable]](10)
@@ -21,7 +21,7 @@ val nodes = List(
     def action = react { s => fail(new RuntimeException(s)) }
   },
 
-  new Supervisor[Throwable] with Input(errors) {
+  new Supervisor(errors) {
     def action = react { s => effectTotal(println(s)) }
   }
 )
@@ -42,7 +42,7 @@ val nodes1 = assemble(errors)(
     def action = react { s => fail(new RuntimeException(s)) }
   },
 
-  new Supervisor[Throwable] with Input(_) {
+  new Supervisor(_) {
     def action = react { s => effectTotal(println(s)) }
   }
 
