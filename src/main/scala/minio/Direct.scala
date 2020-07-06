@@ -8,6 +8,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   val ignore    = (_: Any) => Stop
   val fiberDie  = (t: Throwable) => Access((fiber: Fiber[Any, Any]) => fiber.die(t).tail)
   val fiberLive = (fiber: Fiber[Any, Any]) => fiber.isAlive
+  def shift(tail: Tail): Tail = Shift(tail, fiberDie)
+  def check(tail: Tail): Tail = Check(fiberLive, tail)
 
   abstract class IO[+E, +A] extends IOops[E, A] { self =>
 
@@ -47,11 +49,11 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
     def fork = new IO[Nothing, Fiber[E, A]] {
       def eval(ke: Nothing => Tail, ka: Fiber[E, A] => Tail) = 
-        Check(fiberLive, 
+        check( 
           Access( 
             _.fork(self).eval( ignore, 
                 child => Fork( 
-                  Shift(child.start.tail, fiberDie).provide(child), 
+                  shift(child.start.tail).provide(child), 
                   ka(child))
             )
           )
@@ -112,20 +114,20 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def effectBlocking[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
-      Check( fiberLive, 
+      check( 
         Blocking( 
           Catch(() => a, 
-            a => Check(fiberLive, Shift(ka(a), fiberDie)), 
-            t => Shift(kt(t), fiberDie))))
+            a => check(shift(ka(a))), 
+            t => shift(kt(t)))))
   }
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail) = 
-      Check( fiberLive, 
+      check( 
         Async( resume => 
           register( ea => 
             resume(
-              Check(fiberLive, Shift(ea.eval(ke, ka), fiberDie))
+              check(shift(ea.eval(ke, ka)))
             )
           )
         )
@@ -166,12 +168,12 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   def check = new IO[Nothing, Unit] {
     def eval(ke: Nothing => Tail, ka: Unit => Tail) =
-      Check( fiberLive, Shift(ka(()), fiberDie))
+      check(shift(ka(())))
   }
 
   lazy val defaultRuntime = {
     def runTopLevelFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
-      Tail.run(Shift(fiber.start.tail, fiberDie).provide(fiber), runtime.platform)
+      Tail.run(shift(fiber.start.tail).provide(fiber), runtime.platform)
 
     new Runtime( Platform.default, runTopLevelFiber(_, _))
   }
