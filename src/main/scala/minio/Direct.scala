@@ -55,7 +55,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
           Access( 
             _.fork(self).eval( ignore, 
                 child => Fork( 
-                  shift(child.start.tail).provide(child), 
+                  Provide(child, shift(child.start.tail)), 
                   ka(child))
             )
           )
@@ -175,7 +175,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
 
   lazy val defaultRuntime = {
     def runTopLevelFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
-      Tail.run(shift(fiber.start.tail).provide(fiber), runtime.platform)
+      Tail.run(Provide(fiber, shift(fiber.start.tail)), runtime.platform)
 
     new Runtime( Platform.default, runTopLevelFiber(_, _))
   }
