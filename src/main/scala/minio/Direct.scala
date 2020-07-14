@@ -106,7 +106,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   }
 
   def effectTotal[A](a: => A) = new IO[Nothing, A] {
-    def eval(ke: Nothing => Tail, ka: A => Tail) = ka(a)
+    def eval(ke: Nothing => Tail, ka: A => Tail) = Catch(() => a, ka, fiberDie)
   }
 
   def effect[A](a: => A) = new IO[Throwable, A] {
