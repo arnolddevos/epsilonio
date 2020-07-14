@@ -1,13 +1,14 @@
-package minio.playground
+package minio
+package playground
 
-import minio.api2._
-import minio.nodes._
-import wiring._
+import api2._
+import nodes._
+import nodes.wiring._
 
 val stage1, stage2 = queue[String](10)
 val errors = queue[Supervisory[Throwable]](10)
 
-val nodes = List(
+val nodes0 = List(
 
   new Supervised(errors) with Output(stage1) with Name("data source") {
     def action = output("the message")
@@ -48,9 +49,9 @@ val nodes1 = assemble(errors)(
 
 )
 
-def start = foreach(nodes)(_.start).unit
+def start = foreach(nodes0)(_.start).unit
 
 object ExampleMain extends App {
   defaultRuntime.unsafeRunAsync(start)
-  Console.in.readLine
+  Console.in.readLine()
 }
