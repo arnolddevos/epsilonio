@@ -8,17 +8,6 @@ import scala.collection.immutable.ListMap
 class Runner(val asserts: Boolean=true, indent: Int=0) { test =>
   def apply[A](name: String, trial: => String="")(action: => A) = Test(name, () => trial, () => action)
 
-  def async[A](name: String, trial: => String="", timeout: Duration=1.milli)(action: Promise[A] => Unit) = {
-    def article = {
-      val p = Promise[A]()
-      action(p)
-      val f = p.future
-      Await.ready(f, timeout)
-      f.value.get.get
-    }
-    Test(name, () => trial, () => article)
-  }
-
   class Test[A](val name: String, trial: () => String, action: () => A) {
 
     def attempt(predicate: A => Boolean): Try[A] = {
@@ -51,6 +40,17 @@ class Runner(val asserts: Boolean=true, indent: Int=0) { test =>
       if(asserts) attempt(predicate)
   }
 
+  def async[A](name: String, trial: => String="", timeout: Duration=10.milli)(action: Promise[A] => Unit) = {
+    def article = {
+      val p = Promise[A]()
+      action(p)
+      val f = p.future
+      Await.ready(f, timeout)
+      f.value.get.get
+    }
+    Test(name, () => trial, () => article)
+  }
+
   def suite(name: String)(action: Runner => Unit): Unit = {
     val report = test(name) {
       val runner = new Runner(asserts, indent+1)
@@ -65,7 +65,8 @@ class Runner(val asserts: Boolean=true, indent: Int=0) { test =>
   private var results = ListMap[String, Summary]()
 
   private def record(s: Summary): Unit = synchronized {
-    results = results.updated(s.name, results.get(s.name).fold(s)(_.merge(s)))
+    def slog = { println(s"Found test: ${s.name}"); s }
+    results = results.updated(s.name, results.get(s.name).fold(slog)(_.merge(s)))
   }
 
   def report(): Report = Report(results.values.toList)
@@ -92,15 +93,15 @@ enum Outcome {
 }
 
 case class Summary(
-  name: String,
-  indent: Int,
-  count: Int,
-  fails: Int,
-  index: Int,
-  tmin: Long,
-  ttot: Long,
-  tmax: Long,
-  outcome: Outcome
+  name: String,    // name of the test
+  indent: Int,     // nesting depth of the test in suites
+  count: Int,      // number of trials
+  fails: Int,      // number of failures
+  index: Int,      // index of the the test that produced outcome
+  tmin: Long,      // minimum of test durations
+  ttot: Long,      // total of test durations
+  tmax: Long,      // maximum of the test durations
+  outcome: Outcome // the first failure or `Pass`
 ) {
   def merge(other: Summary) =
     Summary(
@@ -118,18 +119,24 @@ case class Summary(
   def avg: Double = ttot.toDouble/count/1000.0
   def min: Double = tmin.toDouble/1000.0
   def max: Double = tmax.toDouble/1000.0
-  
-  def formatted: String = {
+}
+
+case class Report(results: List[Summary]) {
+  def passed = results.forall(_.outcome.passed)
+  def formatted: String = results.map(detail).mkString("\n")
+    
+  private def detail(s: Summary): String = {
     import Outcome._
+    import s._
 
     val spaces1 = " "*(indent+1)
-    val spaces2 = " "*(50-name.size).max(1)
+    val spaces2 = " "*(40-name.size-indent).max(1)
     val symbol =
       outcome match {
         case Passed            => "P"
         case Failed(_)         => "F"
-        case TestThrows(_, _)  => "X"
-        case CheckThrows(_, _) => "C"
+        case TestThrows(_, _)  => "!"
+        case CheckThrows(_, _) => "?"
       }
     val debug =
       outcome match {
@@ -138,12 +145,16 @@ case class Summary(
         case TestThrows(trial, ex)  => s"$trial ${ex.getMessage}"
         case CheckThrows(trial, ex) => s"$trial ${ex.getMessage}"
       }
+    val reset = Console.RESET
+    val black = Console.BLACK
+    val (color, backg) = 
+      outcome match {
+        case Passed            => (Console.GREEN, Console.GREEN_B)
+        case Failed(_)         => (Console.RED, Console.RED_B)
+        case TestThrows(_, _)  => (Console.YELLOW, Console.YELLOW_B)
+        case CheckThrows(_, _) => (Console.YELLOW, Console.YELLOW_B)
+      }
   
-    s"$symbol$spaces1$name$spaces2$min $avg $max $debug"
+    f"$backg$black $symbol $reset$spaces1$color$name$reset$spaces2$min%1.3f $avg%1.3f $max%1.3f $debug"
   }
-}
-
-case class Report(results: List[Summary]) {
-  def passed = results.forall(_.outcome.passed)
-  def formatted: String = results.map(_.formatted).mkString("\n")
 }
