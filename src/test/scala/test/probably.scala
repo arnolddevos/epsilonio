@@ -11,7 +11,14 @@ object Main extends App {
     runner("test") { 2 + 2 }.assert(_ == 4)
     runner.report()
   }.assert(_.results.size == 1)
-  
+    
+  test("tests with the same name get counted") {
+    val runner = new Runner()
+    runner("test") { 2 + 2 }.assert(_ == 4)
+    runner("test") { 2 + 2 }.assert(_ == 4)
+    runner.report()
+  }.assert(_.results.head.count == 2)
+
   test("tests with different names displayed separately") {
     val runner = new Runner()
     runner("alpha") { 2 + 2 }.assert(_ == 4)
@@ -60,7 +67,7 @@ object Main extends App {
     for(i <- 1 to 10) runner("integers are less than seven")(i).assert(_ < 7)
     runner.report().results.head
   }.assert {
-    case Summary(_, _, 10, 4, _, _, _, Failed(_)) => true
+    case Summary(_, _, 10, 4, 6, _, _, _, Failed(_)) => true
     case x => false
   }
   
