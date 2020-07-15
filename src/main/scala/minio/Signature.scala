@@ -72,6 +72,7 @@ trait Signature {
   type Runtime <: RuntimeOps
 
   trait RuntimeOps {
+    def platform: Platform
     def unsafeRunAsync[E, A](ea: => IO[E, A])(k: Exit[E, A] => Any): Unit
     def unsafeRunSync[E, A](ea: => IO[E, A]): Exit[E, A] 
   }
