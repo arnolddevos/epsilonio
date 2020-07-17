@@ -5,13 +5,15 @@ import scala.concurrent.{Promise, Future, Await}
 import scala.concurrent.duration._
 import scala.collection.immutable.ListMap
 
-class Runner(val asserts: Boolean=true, indent: Int=0) { test =>
+class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
   def apply[A](name: String, trial: => String="")(action: => A) = Test(name, () => trial, () => action)
 
   class Test[A](val name: String, trial: () => String, action: () => A) {
 
     def attempt(predicate: A => Boolean): Try[A] = {
 
+      @annotation.tailrec
+      def loop(n: Int): Try[A] = {
       val t0 = System.currentTimeMillis
       val ta = Try(action())
       val td = System.currentTimeMillis - t0
@@ -30,7 +32,10 @@ class Runner(val asserts: Boolean=true, indent: Int=0) { test =>
 
       val nf = if(outcome.passed) 0 else 1
       record(Summary(name, indent, 1, nf, 0, td, td, td, outcome))
-      ta
+        if(n <= 1) ta else loop(n-1)
+    }
+
+      loop(repeat)
     }
 
     def check(predicate: A => Boolean): A =
@@ -51,9 +56,9 @@ class Runner(val asserts: Boolean=true, indent: Int=0) { test =>
     Test(name, () => trial, () => article)
   }
 
-  def suite(name: String)(action: Runner => Unit): Unit = {
+  def suite(name: String, asserts: Boolean=asserts, repeat: Int=1)(action: Runner => Unit): Unit = {
     val report = test(name) {
-      val runner = new Runner(asserts, indent+1)
+      val runner = Runner(asserts=asserts, indent=indent+1, repeat=repeat)
       action(runner)
       runner.report()  
     }.check(_.passed)
