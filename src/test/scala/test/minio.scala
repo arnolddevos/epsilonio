@@ -17,7 +17,7 @@ object Main extends App {
     pl.fatal(new OutOfMemoryError())
   }.assert(x => x)
 
-  test.suite("IO tests") { test =>
+  test.suite("IO tests", repeat=10) { test =>
 
     def testf[A, B](name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B]) =
       test(name, trial=s"value=$value"){
