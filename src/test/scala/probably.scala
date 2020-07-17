@@ -70,8 +70,7 @@ class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
   private var results = ListMap[String, Summary]()
 
   private def record(s: Summary): Unit = synchronized {
-    def slog = { println(s"Found test: ${s.name}"); s }
-    results = results.updated(s.name, results.get(s.name).fold(slog)(_.merge(s)))
+    results = results.updated(s.name, results.get(s.name).fold(s)(_.merge(s)))
   }
 
   def report(): Report = Report(results.values.toList)
