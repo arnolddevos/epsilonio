@@ -172,8 +172,8 @@ trait Fibers extends Signature { this: Synchronization =>
   
     def unsafeRunAsync[E, A](ea: => IO[E, A])(k: Exit[E, A] => Any): Unit = {
       val fiber = new Fiber(effectSuspendTotal(ea))
-      runFiber(fiber, this)
       fiber.awaitNow(k)
+      runFiber(fiber, this)
     }
 
     def unsafeRunSync[E, A](ea: => IO[E, A]): Exit[E, A] = {
