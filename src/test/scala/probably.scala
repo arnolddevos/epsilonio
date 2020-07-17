@@ -14,26 +14,26 @@ class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
 
       @annotation.tailrec
       def loop(n: Int): Try[A] = {
-      val t0 = System.currentTimeMillis
-      val ta = Try(action())
-      val td = System.currentTimeMillis - t0
+        val t0 = System.currentTimeMillis
+        val ta = Try(action())
+        val td = System.currentTimeMillis - t0
 
-      import Outcome._
+        import Outcome._
 
-      val outcome = ta match {
-        case Success(a) => 
-          Try(predicate(a)) match {
-            case Success(true)  => Passed
-            case Success(false) => Failed(trial())
-            case Failure(e)     => CheckThrows(trial(), e)
-          }
-        case Failure(e)         => TestThrows(trial(), e)
-      }
+        val outcome = ta match {
+          case Success(a) => 
+            Try(predicate(a)) match {
+              case Success(true)  => Passed
+              case Success(false) => Failed(trial())
+              case Failure(e)     => CheckThrows(trial(), e)
+            }
+          case Failure(e)         => TestThrows(trial(), e)
+        }
 
-      val nf = if(outcome.passed) 0 else 1
-      record(Summary(name, indent, 1, nf, 0, td, td, td, outcome))
+        val nf = if(outcome.passed) 0 else 1
+        record(Summary(name, indent, 1, nf, 0, td, td, td, outcome))
         if(n <= 1) ta else loop(n-1)
-    }
+      }
 
       loop(repeat)
     }
@@ -84,17 +84,13 @@ enum Outcome {
   case TestThrows(trial: String, error: Throwable)
   case CheckThrows(trial: String, error: Throwable)
 
-  def merge(other: Outcome) = 
-    this match {
-      case Passed => other
-      case _      => this
-    }
-
   def passed = 
     this match {
       case Passed => true
       case _      => false
     }
+  
+  def failed = ! passed
 }
 
 case class Summary(
@@ -102,11 +98,11 @@ case class Summary(
   indent: Int,     // nesting depth of the test in suites
   count: Int,      // number of trials
   fails: Int,      // number of failures
-  index: Int,      // index of the the test that produced outcome
-  tmin: Long,      // minimum of test durations
-  ttot: Long,      // total of test durations
-  tmax: Long,      // maximum of the test durations
-  outcome: Outcome // the first failure or `Pass`
+  index: Int,      // number of trials before the given outcome
+  tmin: Long,      // minimum of trial durations
+  ttot: Long,      // total of trial durations
+  tmax: Long,      // maximum of the trial durations
+  outcome: Outcome // the first failure or just `Pass`
 ) {
   def merge(other: Summary) =
     Summary(
@@ -114,11 +110,11 @@ case class Summary(
       indent, 
       count+other.count, 
       fails+other.fails,
-      if(outcome.passed) count+other.index else index,
+      if(outcome.failed) index else count+other.index,
       tmin.min(other.tmin), 
       ttot + other.ttot, 
       tmax.max(other.tmax), 
-      outcome.merge(other.outcome)
+      if(outcome.failed) outcome else other.outcome
     )
 
   def avg: Double = ttot.toDouble/count/1000.0
@@ -146,7 +142,7 @@ case class Report(results: List[Summary]) {
     val debug =
       outcome match {
         case Passed                 => ""
-        case Failed(trial)          => trial
+        case Failed(trial)          => s"$trial at $index"
         case TestThrows(trial, ex)  => s"$trial ${ex.getMessage}"
         case CheckThrows(trial, ex) => s"$trial ${ex.getMessage}"
       }
@@ -160,6 +156,6 @@ case class Report(results: List[Summary]) {
         case CheckThrows(_, _) => (Console.YELLOW, Console.YELLOW_B)
       }
   
-    f"$backg$black $symbol $reset$spaces1$color$name$reset$spaces2$min%1.3f $avg%1.3f $max%1.3f $debug"
+    f"$backg$black $symbol $reset$spaces1$color$name$reset$spaces2$count%3d $min%1.3f $avg%1.3f $max%1.3f $debug"
   }
 }
