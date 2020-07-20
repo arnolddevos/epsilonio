@@ -3,7 +3,6 @@ package playground
 
 import api2._
 import nodes._
-import nodes.wiring._
 
 val stage1, stage2 = queue[String](10)
 val errors = queue[Supervisory[Throwable]](10)
