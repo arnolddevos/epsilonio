@@ -10,6 +10,13 @@ object Main extends App {
   val rt = defaultRuntime
   val pl = rt.platform
 
+  def [A, B](test: Runner).io(name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B]) =
+    test(name, trial=s"value=$value"){
+      defaultRuntime.unsafeRunSync(article(value)).option
+    }.assert {
+      case Some(b) if expect(value) == b => true
+      case _ => false
+    }
 
   println(s"using runtime $rt main thread is ${Thread.currentThread.getId}")
 
@@ -19,15 +26,7 @@ object Main extends App {
 
   test.suite("IO tests", repeat=10) { test =>
 
-    def testf[A, B](name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B]) =
-      test(name, trial=s"value=$value"){
-        rt.unsafeRunSync(article(value)).option
-      }.assert {
-        case Some(b) if expect(value) == b => true
-        case _ => false
-      }
-    
-    testf("evaluate a pure success")(42, identity) {
+    test.io("evaluate a pure success")(42, identity) {
       succeed(_)
     }
 
@@ -53,23 +52,23 @@ object Main extends App {
       case _        => false
     }
 
-    testf("flatMap pure effects")(42, _ - 1) {
+    test.io("flatMap pure effects")(42, _ - 1) {
       x => succeed(x).flatMap(n => succeed(n-1))
     }
 
-    testf("traverse a list of effects")(Iterable(1, 2, 3), identity) {
+    test.io("traverse a list of effects")(Iterable(1, 2, 3), identity) {
       xs => foreach(xs)(succeed)
     }
 
-    testf("map effect")(2, _ + 6) {
+    test.io("map effect")(2, _ + 6) {
       n => succeed(n).map(_ + 6)
     }
 
-    testf("zip effects")(("the", 2), identity) {
+    test.io("zip effects")(("the", 2), identity) {
       (s, n) => succeed(s).zip(succeed(n))
     }
 
-    testf("exercise a queue")("payload", identity) {
+    test.io("exercise a queue")("payload", identity) {
       x =>
         for {
           q <- effectTotal(queue[String](10))
@@ -79,7 +78,7 @@ object Main extends App {
         yield y
     }
 
-    testf("exercise a queue little harder")("payload", identity) {
+    test.io("exercise a queue little harder")("payload", identity) {
       x =>
         for {
           q <- effectTotal(queue[String](10))
@@ -93,7 +92,7 @@ object Main extends App {
         yield y
     }
 
-    testf("exercise just enqueue ops")(Iterable(1, 2, 3), xs => xs.map(_ => ())) {
+    test.io("exercise just enqueue ops")(Iterable(1, 2, 3), xs => xs.map(_ => ())) {
       xs =>
         for {
           q <- effectTotal(queue[Int](10))
@@ -102,7 +101,7 @@ object Main extends App {
         yield ys
     }
 
-    testf("exercise a queue harder")(Iterable(1, 2, 3, 5, 6), identity) {
+    test.io("exercise a queue harder")(Iterable(1, 2, 3, 5, 6), identity) {
       xs =>
         for {
           q <- effectTotal(queue[Int](10))
@@ -112,7 +111,7 @@ object Main extends App {
         yield ys
     }
 
-    testf("producer and consumer")(1 to 1000, identity) {
+    test.io("producer and consumer")(1 to 1000, identity) {
       xs =>
         for {
           q  <- effectTotal(queue[Int](10))
@@ -130,7 +129,7 @@ object Main extends App {
 
     def tid() = Thread.currentThread.getId
 
-    test.async("the platform can execute a thunk asynchronously") {
+    test.async("the platform runs asynchronous thunks") {
       p => pl.executeAsync(p.success(tid()))
     }.assert(_ != tid())
 
@@ -142,54 +141,78 @@ object Main extends App {
     def log[A](a: => A): Tail[TestEnv[A]] = Access(e => Catch(() => e.log(a), stop, stop))
     def stop: Any => Tail[TestEnv[Nothing]] = _ => Access(e => Catch(() => e.stop, _ => Stop, _ => Stop))
 
-    def testt[A](name: String)(a: A)(t: Tail[TestEnv[A]])(p: Buffer[A] => Boolean) =
+    def [A](test: Runner).tail(name: String)(a: A)(t: Tail[TestEnv[A]])(p: Buffer[A] => Boolean) =
       test.async(name, trial=a.toString) { 
         (pr: Promise[Buffer[A]]) =>
           val e = TestEnv(Buffer(a), pr)
           Tail.run(Provide(e, t), pl)
       }.assert(p)
 
-    testt("a successful effect")(0) {
+    test.tail("a successful effect")(0) {
       Access( e => Catch({() => e.log(1); 2}, log, stop))
     } {
       case Buffer(0, 1, 2) => true
       case _ => false
     }
 
-    testt("a throwing effect")(new Throwable()) {
+    test.tail("a throwing effect")(new Throwable()) {
       Catch(() => throw Exception("expected"), stop, log)
     } {
       case Buffer(_, ex) if ex.getMessage == "expected" => true
       case _ => false
     }
 
-    testt("interrupt an effect")(0) {
+    test.tail("an asynchonous effect")(0) {
+      Async(cb => cb(log(1)))
+    } {
+      case Buffer(0, 1) => true
+      case _ => false
+    }
+
+    test.tail("interrupt an effect")(0) {
       Check(_ => false, log(1), log(2))
     } {
       case Buffer(0, 2) => true
       case _ => false
     }
 
-    testt("mask an interrupt")(0) {
+    test.tail("mask an interrupt")(0) {
       Mask(Check(_ => false, log(1), log(2)))
     } {
       case Buffer(0, 1) => true
       case _ => false
     }
 
-    testt("unmask an interrupt")(0) {
+    test.tail("unmask an interrupt")(0) {
       Mask(Unmask(Check(_ => false, log(1), log(2))))
     } {
       case Buffer(0, 2) => true
       case _ => false
     }
 
-    testt("shift an effect to another thread")(tid()) {
+    test.tail("fork an effect")(0) {
+      Access(e => Fork(Provide(e, log(1)), log(2)))
+    } {
+      case Buffer(0, 1, 2) => true
+      case _ => false
+    }
+
+    test.tail("shift an effect to another thread")(tid()) {
       Access( e => Catch(() => e.log(tid()), _ => Shift(log(tid()), stop), stop))
     } {
       case Buffer(_, t2, t3) if t2 != t3 => true
       case _ => false
     }
+
+    test.tail("a blocking effect (5ms)")(0) {
+      Blocking(Catch(() =>Thread.sleep(5), _ => log(1), stop))
+    } {
+      case Buffer(0, 1) => true
+      case _ => false     
+    }
+  }
+
+  test.suite("Node tests"){ test =>
   }
 
   println(test.report().formatted)
