@@ -7,67 +7,29 @@ import scala.concurrent.duration._
 /**
 * A node in a dataflow graph.  
 */
-sealed trait Node {
-  type Failure
-  def start: IO[Nothing, Fiber[Failure, Unit]]
-  def action: IO[Failure, Unit]
+trait Node[+E, +A] {
+  def action: IO[E, A]
 }
 
 /**
 * A message to a supervisor node.
 */
-enum Supervisory[+E] {
-  case Started(node: Node, fiber: Fiber[E, Unit])
-  case Stopped(node: Node, fiber: Fiber[E, Unit], exit: Exit[E, Unit])
-}
-
-/**
-* An unsupervised node that does not allow for failure.  
-*/
-trait UnsupervisedT extends Node {
-  type Failure = Nothing
-  final def start: IO[Nothing, Fiber[Nothing, Unit]] = action.fork
-}
-
-/**
-* A supervised node that reports start and finish supervisory events.  
-*/
-trait SupervisedT[E] extends Node {
-  type Failure = E
-
-  def supervisor: Supervisory[E] => IO[Nothing, Unit]
-
-  final def start: IO[Nothing, Fiber[E, Unit]] = {
-    import Supervisory._
-    println(s"Start invoked: $this")
-
-    def monitor(fiber: Fiber[E, Unit]) =
-      for {
-        ex <- fiber.await
-        _  <- supervisor(Stopped(this, fiber, ex))
-      }
-      yield ()
-
-    for {
-      fiber <- action.fork
-      _     <- supervisor(Started(this, fiber))
-      _     <- monitor(fiber).fork
-    }
-    yield fiber
-  }
+enum Supervisory[+E, +A] {
+  case Started(node: Node[E, A], fiber: Fiber[E, A])
+  case Stopped(node: Node[E, A], fiber: Fiber[E, A], exit: Exit[E, A])
 }
 
 /**
 * A node that accepts input.  
 */
-trait InputT[A] { this: Node =>
+trait InputT[A] { this: Node[Any, Any] =>
 
   def input: IO[Nothing, A]
 
-  final def react[E]( step: A => IO[E, Unit]): IO[E, Unit] = 
+  final def react[E, B]( step: A => IO[E, B]): IO[E, B] = 
     input.flatMap(step)
 
-  final def reactWithin[E](amount: Duration)(step: Option[A] => IO[E, Unit]): IO[E, Unit] =
+  final def reactWithin[E, B](amount: Duration)(step: Option[A] => IO[E, B]): IO[E, B] =
     input.map(Some(_)).race(delay(amount).as(None)).flatMap(step)
 
 }
@@ -75,54 +37,113 @@ trait InputT[A] { this: Node =>
 /**
 * A node that accepts an alternative input.  
 */
-trait WyeT[A] {  this: Node => 
+trait WyeT[A] {  this: Node[Any, Any] => 
   def wye: IO[Nothing, A]
 }
 
 /**
 * A node that produces output.  
 */
-trait OutputT[A] { this: Node => 
+trait OutputT[A] { this: Node[Any, Any] => 
   def output: A => IO[Nothing, Unit]
 }
 
 /**
 * A node that produces an alternative output.  
 */
-trait TeeT[A] {  this: Node => 
+trait TeeT[A] {  this: Node[Any, Any] => 
   def tee: A => IO[Nothing, Unit]
 }
 
 /**
-* A top level supervisor node.
-*/
-trait SupervisorT[E] extends UnsupervisedT with InputT[Supervisory[E]]
-
-trait Supervised[G : Out[Supervisory[E]], E](g: G) extends SupervisedT[E] { this: Node =>
-  val supervisor = g.output
-}
-
-trait Input[G : In[A], A](g: G) extends InputT[A] { this: Node =>
+ *  Specify an input.
+ */
+trait Input[G : In[A], A](g: G) extends InputT[A] { this: Node[Any, Any] =>
   val input = g.input
 }
 
-trait Wye[G : In[A], A](g: G) extends WyeT[A] { this: Node =>
+/**
+ *  Specify a second input.
+ */
+trait Wye[G : In[A], A](g: G) extends WyeT[A] { this: Node[Any, Any] =>
   val wye = g.input
 }
 
-trait Output[G : Out[A], A](g: G) extends OutputT[A] { this: Node =>
+/**
+ *  Specify an output.
+ */
+trait Output[G : Out[A], A](g: G) extends OutputT[A] { this: Node[Any, Any] =>
   val output = g.output
 }
 
-trait Tee[G : Out[A], A](g: G) extends TeeT[A] { this: Node =>
+/**
+ *  Specify a second output.
+ */
+trait Tee[G : Out[A], A](g: G) extends TeeT[A] { this: Node[Any, Any] =>
   val tee = g.output
 }
 
-trait Supervisor[G : In[Supervisory[A]], A](g: G) extends SupervisorT[A] { this: Node =>
-  val input = g.input
+/**
+ * A supervisor depends on a status input channel.
+ */
+ type Supervisor[-E, -A] = IO[Nothing, Supervisory[E, A]] => Node[Nothing, Unit]
+
+
+/**
+ * The default supervisor node. Interrupts all nodes if one fails.
+ */
+ val allFailSupervisor: Supervisor[Any, Any] = {
+   status => 
+    new Node[Nothing, Unit] with Input(status) {
+      import Supervisory._
+
+      def action = react {
+        case Stopped(_, _, ex) if !ex.succeeded => unit
+        case _ => action
+      }
+    }
+ }
+
+/**
+ * A system of nodes with a supervisor.
+ */
+class System[E, A](supervisor: Supervisor[E, A] = allFailSupervisor)(nodes: => Iterable[Node[E, A]]) { 
+
+  def start: IO[Nothing, Unit] = { 
+
+    val status = queue[Supervisory[E, A]](1)
+
+    def startNode(node: Node[E, A]): IO[Nothing, Unit] = {
+      import Supervisory._
+
+      def monitor(fiber: Fiber[E, A]) =
+        for {
+          ex <- fiber.await
+          _  <- status.offer(Stopped(node, fiber, ex))
+        }
+        yield ()
+
+      for {
+        fiber <- node.action.fork
+        _     <- status.offer(Started(node, fiber)).fork
+        _     <- monitor(fiber).fork
+      }
+      yield ()
+    }
+
+    for {
+      _ <- foreach(nodes)(startNode)
+      s = supervisor(status.take)
+      _ <- s.action
+    }
+    yield ()
+  }
 }
 
-trait Name(name: String) { this: Node =>
+/**
+ * Specify a name for a node.
+ */
+trait Name(name: String) { this: Node[Any, Any] =>
   override def toString  = name
 }
 
@@ -152,5 +173,8 @@ trait ConnectIn[-G, +A] {
 object ConnectIn {
   given gateConnectIn[A] as ConnectIn[Gate[Nothing, A], A] {
     def (g: Gate[Nothing, A]).input = g.take
+  }
+  given identityConnectIn[A] as ConnectIn[IO[Nothing, A], A] {
+    def (i: IO[Nothing, A]).input = i
   }
 }

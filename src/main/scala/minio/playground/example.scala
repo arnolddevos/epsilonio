@@ -4,53 +4,36 @@ package playground
 import api2._
 import nodes._
 
-val stage1, stage2 = queue[String](10)
-val errors = queue[Supervisory[Throwable]](10)
+val exampleSuper: Supervisor[Any, Any] = {
+  status => 
+   new Node[Nothing, Unit] with Input(status) {
+     import Supervisory._
 
-val nodes0 = List(
+     def action = react {
+       case s @ Stopped(_, _, ex) if !ex.succeeded => effectTotal(println(s))
+       case s => effectTotal(println(s)) andThen action
+     }
+   }
+}
 
-  new Supervised(errors) with Output(stage1) with Name("data source") {
-    def action = output("the message")
-  },
+val sys = System[Throwable, Unit](exampleSuper) {
+  val stage1, stage2 = queue[String](10)
 
-  new Supervised(errors) with Input(stage1) with Output(stage2) with Name("data enrich") {
-    def action = react { s => output("here it comes...") andThen output(s) andThen action }
-  },
+  List(
+    new Node with Output(stage1) with Name("data source") {
+      def action = output("the message")
+    },
 
-  new Supervised(errors) with Input(stage2) with Name("data sink") {
-    def action = react { s => fail(new RuntimeException(s)) }
-  },
+    new Node with Input(stage1) with Output(stage2) with Name("data enrich") {
+      def action = react { s => output("here it comes...") andThen output(s) andThen action }
+    },
 
-  new Supervisor(errors) {
-    def action = react { s => effectTotal(println(s)) }
-  }
-)
-
-def assemble[G : In[E] : Out[E], E](gate: G)(ctors: G => Node*) = ctors.map(ctor => ctor(gate))
-
-val nodes1 = assemble(errors)(
-
-  new Supervised(_) with Output(stage1) with Name("data source") {
-    def action = output("the message")
-  },
-
-  new Supervised(_) with Input(stage1) with Output(stage2) with Name("data enrich") {
-    def action = react { s => output("here it comes...") andThen output(s) andThen action }
-  },
-
-  new Supervised(_) with Input(stage2) with Name("data sink") {
-    def action = react { s => fail(new RuntimeException(s)) }
-  },
-
-  new Supervisor(_) {
-    def action = react { s => effectTotal(println(s)) }
-  }
-
-)
-
-def start = foreach(nodes0)(_.start).unit
+    new Node with Input(stage2) with Name("data sink") {
+      def action = react { s => effect(println(s"received: $s")) andThen action }
+    },
+  )
+}
 
 object ExampleMain extends App {
-  defaultRuntime.unsafeRunAsync(start)
-  Console.in.readLine()
+  defaultRuntime.unsafeRunSync(sys.start)
 }
