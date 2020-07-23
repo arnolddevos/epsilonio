@@ -212,7 +212,61 @@ object Main extends App {
     }
   }
 
-  test.suite("Node tests"){ test =>
+  test.suite("Node tests", repeat=10){ test =>
+    import minio.nodes._
+    import Supervisory._
+
+    def run(e: IO[Nothing, Any]) = defaultRuntime.unsafeRunAsync(e)(_ => ())
+
+    test.async[Int]("start an isolated node") { p =>
+      object N extends UnsupervisedT {
+        def action = effectTotal(p.success(42)).unit
+      }
+      run(N.start)
+    }.assert {
+      _ == 42
+    }
+
+    test.async[String]("pass a message between nodes") { p => 
+      val q1 = queue[String](10)
+      object P extends UnsupervisedT with Output(q1) {
+        def action = output("Hello world!")
+      }
+      object C extends UnsupervisedT with Input(q1) {
+        def action = react { m => effectTotal(p.success(m)).unit }
+      }
+      run(P.start.andThen(C.start))
+    }.assert {
+      _ == "Hello world!"
+    }
+
+    test.async[String]("start a supervised node", timeout=20.milli) { p =>
+      val e = queue[Supervisory[Throwable]](10)
+      object S extends Supervisor(e) {
+        def action = react { 
+          case Started(n, f) => 
+            react {
+              case Stopped(`n`, `f`, x) if x.succeeded => 
+                effectTotal(p.success("OK!")).unit
+              case Stopped(n, f, x) => 
+                effectTotal(p.success(s"Nah. Stop parameters unexpected: $n, $f, $x")).unit
+              case _ => 
+                effectTotal(p.success("Nah. Second startup.")).unit
+            }
+          case _ => 
+            effectTotal(p.success("Nah. Stopped before start.")).unit
+        }
+      }
+      object N extends Supervised(e) {
+        def action = succeed(())
+      }
+      run(N.start.andThen(S.start))
+    }.assert {
+      v =>
+        println(v)
+        v == "OK!"
+    }
+
   }
 
   println(test.report().formatted)
