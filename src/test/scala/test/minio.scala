@@ -219,30 +219,32 @@ object Main extends App {
     def run(e: IO[Nothing, Any]) = defaultRuntime.unsafeRunAsync(e)(_ => ())
 
     test.async[Int]("start an isolated node") { p =>
-      object N extends UnsupervisedT {
+      val sys = System[Nothing, Unit]
+      new Node(sys) {
         def action = effectTotal(p.success(42)).unit
       }
-      run(N.start)
+      run(sys.start)
     }.assert {
       _ == 42
     }
 
     test.async[String]("pass a message between nodes") { p => 
+      val sys = System[Nothing, Unit]
       val q1 = queue[String](10)
-      object P extends UnsupervisedT with Output(q1) {
+      new Node(sys) with Output(q1) {
         def action = output("Hello world!")
       }
-      object C extends UnsupervisedT with Input(q1) {
+      new Node(sys) with Input(q1) {
         def action = react { m => effectTotal(p.success(m)).unit }
       }
-      run(P.start.andThen(C.start))
+      run(sys.start)
     }.assert {
       _ == "Hello world!"
     }
 
     test.async[String]("start a supervised node", timeout=20.milli) { p =>
-      val e = queue[Supervisory[Throwable]](10)
-      object S extends Supervisor(e) {
+      val sys = System[Throwable, Unit]
+      new Supervisor(sys) {
         def action = react { 
           case Started(n, f) => 
             react {
@@ -257,10 +259,10 @@ object Main extends App {
             effectTotal(p.success("Nah. Stopped before start.")).unit
         }
       }
-      object N extends Supervised(e) {
+      new Node(sys) {
         def action = succeed(())
       }
-      run(N.start.andThen(S.start))
+      run(sys.start)
     }.assert {
       v =>
         println(v)
