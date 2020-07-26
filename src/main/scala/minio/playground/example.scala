@@ -32,5 +32,15 @@ val snk = new Node(sys) with Input(stage2) with Name("data sink") {
 }
 
 object ExampleMain extends App {
-  defaultRuntime.unsafeRunSync(sys.start)
+  val envelope =
+    for {
+      fb <- sys.start.fork
+      _  <- effect(Console.in.readLine)
+      _  <- fb.interrupt
+    }
+    yield ()
+
+  defaultRuntime.unsafeRunSync(envelope)
+  
+  
 }
