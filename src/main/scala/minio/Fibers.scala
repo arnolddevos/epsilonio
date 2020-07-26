@@ -29,14 +29,16 @@ trait Fibers extends Signature { this: Synchronization =>
       yield ()
 
     def fork[E1, A1](ea1: IO[E1, A1]): IO[Nothing, Fiber[E1, A1]] = {
-      val child = new Fiber(ea1)
-      state.transact {
-        _ match {
-          case Running            => Updated(Managing(child :: Nil), succeed(child))
-          case Managing(children) => Updated(Managing(child :: children), succeed(child))
-          case Terminated(_)      => Observed(child.interrupt.as(child))
+      for {
+        child <- effectTotal(new Fiber(ea1))
+        _ <- state.transact {
+          _ match {
+            case Running            => Updated(Managing(child :: Nil), unit)
+            case Managing(children) => Updated(Managing(child :: children), unit)
+            case Terminated(_)      => Observed(child.interrupt.unit)
+          }
         }
-      }
+      } yield child
     }
 
     private def exit(ex: Exit[E, A]): IO[Nothing, Exit[E, A]] =
