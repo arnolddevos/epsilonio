@@ -34,7 +34,7 @@ trait Fibers extends Signature { this: Synchronization =>
         _ <- state.transact {
           _ match {
             case Running            => Updated(Managing(child :: Nil), unit)
-            case Managing(children) => Updated(Managing(child :: children), unit)
+            case Managing(children) => Updated(Managing(child :: children.filter(_.isAlive)), unit)
             case Terminated(_)      => Observed(child.interrupt.unit)
           }
         }
