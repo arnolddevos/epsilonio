@@ -1,6 +1,7 @@
 package minio
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.Queue
+import annotation.tailrec
 
 trait Synchronization { this: Signature =>
 
@@ -46,7 +47,8 @@ trait Synchronization { this: Signature =>
     private case class Cell(state: S, jobs: List[Job])
     private val cell = new AtomicReference(Cell(init, Nil))
 
-    private def runJob(job: Job): Unit = {
+    @tailrec
+    private def runJob(job: Job, pending: List[Job] = Nil): Unit = {
       val c0 = cell.get
 
       job.phase1(c0.state) match {
@@ -54,16 +56,23 @@ trait Synchronization { this: Signature =>
         case Updated(s, ea) =>  
           if(cell.compareAndSet(c0, Cell(s, Nil))) { 
             job.phase2(ea)
-            for( pending <- c0.jobs.reverse) runJob(pending)
+            pending ::: c0.jobs.reverse match {
+              case j :: js => runJob(j, js)
+              case Nil    => ()
+              }
           }
-          else runJob(job)
+          else runJob(job, pending)
 
         case Observed(ea) => 
           job.phase2(ea)
+          pending match {
+            case j :: js => runJob(j, js)
+            case Nil    => ()
+          }
 
         case Blocked => 
           if(cell.compareAndSet(c0, Cell(c0.state, job :: c0.jobs))) ()
-          else runJob(job)
+          else runJob(job, pending)
       } 
     }    
   }
