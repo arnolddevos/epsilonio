@@ -45,11 +45,13 @@ trait Fibers extends Signature { this: Synchronization =>
           case Running(i, m, children) =>  
             debug(s"$child -> $this Running with ${children.length} remaining")           
             Updated(Running(i, m, children.filter(_ != child)), unit)
+
           case Cleanup(ex, children) =>
             debug(s"$child -> $this Cleanup with ${children.length} remaining")           
             val r = children.filter(_ != child)
-            val s = if( r.isEmpty) Terminated(ex) else Cleanup(ex, r)
-            Updated(s, unit)
+            if( r.isEmpty) Updated(Terminated(ex), notifyParent) 
+            else Updated(Cleanup(ex, r), unit)
+            
           case Terminated(_) => 
             debug(s"$child -> $this Terminated")           
             Observed(unit)
