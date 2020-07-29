@@ -157,7 +157,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
 
   def interrupt = new IO[Nothing, Nothing] {
-    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access( _.interrupt.tail )
+    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access( _.interruptAsync.tail )
   }
 
   def die(t: => Throwable) = new IO[Nothing, Nothing] {

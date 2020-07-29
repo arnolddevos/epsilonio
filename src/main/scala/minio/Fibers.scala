@@ -2,63 +2,133 @@ package minio
 
 trait Fibers extends Signature { this: Synchronization =>
 
-  final class Fiber[+E, +A](ea: IO[E, A]) extends FiberOps[E, A] {
+  final class Fiber[+E, +A](ea: IO[E, A], parent: Option[Fiber[Any, Any]]) extends FiberOps[E, A] {
 
-    private enum FiberState {
-      case Running
-      case Managing(children: List[Fiber[Any, Any]])
-      case Terminated(ex: Exit[E, A])
-    }
-
-    import FiberState._
+    import State._
     import Exit._
     import Status._
 
-    private val state = new Transactor(Running)
+    private enum State {
+      case Running(interrupt: Boolean, mask: Int, children: List[Fiber[Any, Any]])
+      case Cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]])
+      case Terminated(ex: Exit[E, A])
 
-    def isAlive = state.poll match { 
-      case _: Terminated => false 
-      case _ => true 
+      def running: Boolean = this match { case Running(_, _, _) => true case Cleanup(_, _) | Terminated(_) => false }
     }
 
-    def start: IO[Nothing, Unit] =
-      for {
-        x <- ea.fold(Fail(_), Succeed(_))
-        _ <- exit(x)
-      }
-      yield ()
+    private val state = new Transactor(Running(false, 0, Nil))
+
+    def isAlive = state.poll.running
+
+    def start: IO[Nothing, Unit] = ea.flatMap(succeedAsync).catchAll(failAsync)
 
     def fork[E1, A1](ea1: IO[E1, A1]): IO[Nothing, Fiber[E1, A1]] = {
       for {
-        child <- effectTotal(new Fiber(ea1))
+        child <- effectTotal(new Fiber(ea1, Some(this)))
+        _ = debug(s"$child <- $this")
         _ <- state.transact {
           _ match {
-            case Running            => Updated(Managing(child :: Nil), unit)
-            case Managing(children) => Updated(Managing(child :: children.filter(_.isAlive)), unit)
-            case Terminated(_)      => Observed(child.interrupt.unit)
+            case Running(i, m, children) => Updated(Running(i, m, child :: children), unit)
+            case Cleanup(_, _) | Terminated(_) => Observed(child.interruptAsync)
           }
         }
       } yield child
     }
 
-    private def exit(ex: Exit[E, A]): IO[Nothing, Exit[E, A]] =
+    private def notifyParent: IO[Nothing, Unit] = parent.fold(unit)(_.childTerminated(this))
+
+    private def debug(s: String) = println(s)
+
+    private def childTerminated(child: Fiber[Any, Any]): IO[Nothing, Unit] = {
       state.transact {
         _ match {
-          case Running            => Updated(Terminated(ex), succeed(ex) )
-          case Managing(children) => Updated(Terminated(ex), 
-                                        foreach(children)(_.interrupt).as(ex))
-          case Terminated(ex0)    => Observed(succeed(ex0))
+          case Running(i, m, children) =>  
+            debug(s"$child -> $this Running with ${children.length} remaining")           
+            Updated(Running(i, m, children.filter(_ != child)), unit)
+          case Cleanup(ex, children) =>
+            debug(s"$child -> $this Cleanup with ${children.length} remaining")           
+            val r = children.filter(_ != child)
+            val s = if( r.isEmpty) Terminated(ex) else Cleanup(ex, r)
+            Updated(s, unit)
+          case Terminated(_) => 
+            debug(s"$child -> $this Terminated")           
+            Observed(unit)
+        }
+      }
+    }
+
+    private def cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]]) =
+      if( children.isEmpty) Updated(Terminated(ex), notifyParent)
+      else Updated(Cleanup(ex, children), foreach(children)(_.interruptAsync).unit)
+
+    private def succeedAsync(a: A): IO[Nothing, Unit] =
+      state.transact {
+        _ match {
+          case Running(_, _, children)       => cleanup(Succeed(a), children)
+          case Cleanup(_, _) | Terminated(_) => Observed(unit)
         }
       }
 
-    def die(t: Throwable): IO[Nothing, Exit[E, A]] = exit(Die(t))
+    private def failAsync(e: E): IO[Nothing, Unit] =
+      state.transact {
+        _ match {
+          case Running(_, _, children)       => cleanup(Fail(e), children)
+          case Cleanup(_, _) | Terminated(_) => Observed(unit)
+        }
+      }
+  
+    def dieAsync(t: Throwable): IO[Nothing, Unit] =
+      state.transact {
+        _ match {
+          case Running(_, _, children)       => cleanup(Die(t), children)
+          case Cleanup(_, _) | Terminated(_) => Observed(unit)
+        }
+      }
 
-    def interrupt: IO[Nothing, Exit[E, A]] = exit(Interrupt())
+    def interruptAsync: IO[Nothing, Unit] = 
+      state.transact {
+        _ match {
+          case Running(false, 0, children)   => cleanup(Interrupt(), children)
+          case Running(false, m, children)   => Updated(Running(true, m, children), unit)
+          case Cleanup(_, _) | Terminated(_) => Observed(unit)
+        }
+      }
+
+    def mask: IO[Nothing, Unit] =
+      state.transact {
+        _ match {
+          case Running(false, m, children) => Updated(Running(false, m+1, children), unit)
+          case Running(true, _, _) | Cleanup(_, _) | Terminated(_) => Observed(unit)
+        }
+      }
+
+    def unmask: IO[Nothing, Unit] = 
+      state.transact {
+        _ match {
+          case Running(true, 1, children)       => cleanup(Interrupt(), children)
+          case Running(i, m, children) if m > 1 => Updated(Running(i, m-1, children), unit)
+          case Cleanup(_, _) | Terminated(_)    => Observed(unit)
+        }
+      }
+
+    def die(t: Throwable): IO[Nothing, Exit[E, A]] =
+      for {
+        _  <- dieAsync(t)
+        ex <- await
+      }
+      yield ex
+
+    def interrupt: IO[Nothing, Exit[E, A]] =
+      for {
+        _  <- interruptAsync
+        ex <- await
+      }
+      yield ex
 
     private def awaitTx = state.transaction {
       _ match {
-        case Terminated(ex) => Observed(ex)
-        case _              => Blocked
+        case Terminated(ex)                   => Observed(ex)
+        case Running(_, _, _) | Cleanup(_, _) => Blocked
       }
     }
 
@@ -173,7 +243,7 @@ trait Fibers extends Signature { this: Synchronization =>
       if(platform.fatal(t)) platform.shutdown(t) else t
   
     def unsafeRunAsync[E, A](ea: => IO[E, A])(k: Exit[E, A] => Any): Unit = {
-      val fiber = new Fiber(effectSuspendTotal(ea))
+      val fiber = new Fiber(effectSuspendTotal(ea), None)
       fiber.awaitNow(k)
       runFiber(fiber, this)
     }

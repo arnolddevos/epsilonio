@@ -62,7 +62,7 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
           Tail.Stop
 
         case Interrupt()      => 
-          runCPS(true, fiber.interrupt, ignore, ignore)
+          runCPS(true, fiber.interruptAsync, ignore, ignore)
             
         case Fork(ea)         => 
           if( masked || fiber.isAlive ) {
