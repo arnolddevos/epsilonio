@@ -18,8 +18,6 @@ object Main extends App {
       case _ => false
     }
 
-  println(s"using runtime $rt main thread is ${Thread.currentThread.getId}")
-
   test("an OOM error would be fatal") {
     pl.fatal(new OutOfMemoryError())
   }.assert(x => x)
@@ -264,9 +262,7 @@ object Main extends App {
       }
       run(sys.start)
     }.assert {
-      v =>
-        println(v)
-        v == "OK!"
+      _ == "OK!"
     }
 
   }

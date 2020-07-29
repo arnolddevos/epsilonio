@@ -25,7 +25,6 @@ trait Fibers extends Signature { this: Synchronization =>
     def fork[E1, A1](ea1: IO[E1, A1]): IO[Nothing, Fiber[E1, A1]] = {
       for {
         child <- effectTotal(new Fiber(ea1, Some(this)))
-        _ = debug(s"$child <- $this")
         _ <- state.transact {
           _ match {
             case Running(i, m, children) => Updated(Running(i, m, child :: children), unit)
@@ -37,30 +36,24 @@ trait Fibers extends Signature { this: Synchronization =>
 
     private def notifyParent: IO[Nothing, Unit] = parent.fold(unit)(_.childTerminated(this))
 
-    private def debug(s: String) = println(s)
-
     private def childTerminated(child: Fiber[Any, Any]): IO[Nothing, Unit] = {
       state.transact {
         _ match {
           case Running(i, m, children) =>  
-            debug(s"$child -> $this Running with ${children.length} remaining")           
             Updated(Running(i, m, children.filter(_ != child)), unit)
 
           case Cleanup(ex, children) =>
-            debug(s"$child -> $this Cleanup with ${children.length} remaining")           
             val r = children.filter(_ != child)
             if( r.isEmpty) Updated(Terminated(ex), notifyParent) 
             else Updated(Cleanup(ex, r), unit)
-            
+
           case Terminated(_) => 
-            debug(s"$child -> $this Terminated")           
             Observed(unit)
         }
       }
     }
 
     private def cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]]) = {
-      debug(s"terminate request for $this with ${children.length} children")
       if( children.isEmpty) Updated(Terminated(ex), notifyParent)
       else Updated(Cleanup(ex, children), foreach(children)(_.interruptAsync).unit)
     }
@@ -131,9 +124,9 @@ trait Fibers extends Signature { this: Synchronization =>
 
     private def awaitTx = state.transaction {
       _ match {
-        case Terminated(ex)    => debug(s"waited for $this Terminated with $ex"); Observed(ex)
-        case Running(_, _, cs) => debug(s"awaiting $this Running with ${cs.length} children"); Blocked
-        case Cleanup(_, cs)    => debug(s"awaiting $this Cleanup with ${cs.length} children"); Blocked
+        case Terminated(ex)    => Observed(ex)
+        case Running(_, _, cs) => Blocked
+        case Cleanup(_, cs)    => Blocked
       }
     }
 
