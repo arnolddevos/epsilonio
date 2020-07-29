@@ -59,9 +59,11 @@ trait Fibers extends Signature { this: Synchronization =>
       }
     }
 
-    private def cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]]) =
+    private def cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]]) = {
+      debug(s"terminate request for $this with ${children.length} children")
       if( children.isEmpty) Updated(Terminated(ex), notifyParent)
       else Updated(Cleanup(ex, children), foreach(children)(_.interruptAsync).unit)
+    }
 
     private def succeedAsync(a: A): IO[Nothing, Unit] =
       state.transact {
@@ -129,8 +131,9 @@ trait Fibers extends Signature { this: Synchronization =>
 
     private def awaitTx = state.transaction {
       _ match {
-        case Terminated(ex)                   => Observed(ex)
-        case Running(_, _, _) | Cleanup(_, _) => Blocked
+        case Terminated(ex)    => debug(s"waited for $this Terminated with $ex"); Observed(ex)
+        case Running(_, _, cs) => debug(s"awaiting $this Running with ${cs.length} children"); Blocked
+        case Cleanup(_, cs)    => debug(s"awaiting $this Cleanup with ${cs.length} children"); Blocked
       }
     }
 
