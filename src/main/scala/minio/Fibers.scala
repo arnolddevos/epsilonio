@@ -85,26 +85,28 @@ trait Fibers extends Signature { this: Synchronization =>
     def interruptAsync: IO[Nothing, Unit] = 
       state.transact {
         _ match {
-          case Running(false, 0, children)   => cleanup(Interrupt(), children)
           case Running(false, m, children)   => Updated(Running(true, m, children), unit)
+          case Running(_, _, _) | Cleanup(_, _) | Terminated(_) => Observed(unit)
+        }
+      }
+
+    def mask: IO[Nothing, Unit] = incrMask(+1)
+    
+    def unmask: IO[Nothing, Unit] = incrMask(-1)
+
+    private def incrMask(d: Int): IO[Nothing, Unit] = 
+      state.transact {
+        _ match {
+          case Running(i, m, children)       => Updated(Running(i, m+d, children), unit)
           case Cleanup(_, _) | Terminated(_) => Observed(unit)
         }
       }
 
-    def mask: IO[Nothing, Unit] =
+    def check: IO[Nothing, Unit] =
       state.transact {
         _ match {
-          case Running(false, m, children) => Updated(Running(false, m+1, children), unit)
-          case Running(true, _, _) | Cleanup(_, _) | Terminated(_) => Observed(unit)
-        }
-      }
-
-    def unmask: IO[Nothing, Unit] = 
-      state.transact {
-        _ match {
-          case Running(true, 1, children)       => cleanup(Interrupt(), children)
-          case Running(i, m, children) if m > 1 => Updated(Running(i, m-1, children), unit)
-          case Cleanup(_, _) | Terminated(_)    => Observed(unit)
+          case Running(true, 0, children) => cleanup(Interrupt(), children)
+          case Running(_, _, _) | Cleanup(_, _) | Terminated(_) => Observed(unit)
         }
       }
 
