@@ -19,10 +19,10 @@ trait Synchronization { this: Signature =>
     def transaction[T](tx: S => Status[S, T]): Transaction[S, T] = tx
       
     def transact[E, A](tx: Transaction[S, IO[E, A]]): IO[E, A] = 
-      mask(effectAsync[E, A](k => runJob(Job(tx, k))))
+      effectAsync[E, A](k => runJob(Job(tx, k)))
 
     def transactTotal[A](tx: Transaction[S, A]): IO[Nothing, A] =
-      mask(effectAsync[Nothing, A]( k => runJob(Job(tx, a => k(succeed(a))))))
+      effectAsync[Nothing, A]( k => runJob(Job(tx, a => k(succeed(a)))))
 
     def poll: S = cell.get.state
 
