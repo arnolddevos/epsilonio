@@ -18,21 +18,7 @@ trait Fibers extends Signature { this: Synchronization =>
 
     private val state = new Transactor(Running(false, 0, Nil))
 
-    def isAlive = state.poll.running
-
-    def start: IO[Nothing, Unit] = ea.flatMap(succeedAsync).catchAll(failAsync)
-
-    def fork[E1, A1](ea1: IO[E1, A1]): IO[Nothing, Fiber[E1, A1]] = {
-      for {
-        child <- effectTotal(new Fiber(ea1, Some(this)))
-        _ <- state.transact {
-          _ match {
-            case Running(i, m, children) => Updated(Running(i, m, child :: children), unit)
-            case Cleanup(_, _) | Terminated(_) => Observed(child.interruptAsync)
-          }
-        }
-      } yield child
-    }
+    private def neverReturn: IO[Nothing, Nothing] = effectAsync(_ => ())
 
     private def notifyParent: IO[Nothing, Unit] = parent.fold(unit)(_.childTerminated(this))
 
@@ -54,42 +40,56 @@ trait Fibers extends Signature { this: Synchronization =>
     }
 
     private def cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]]) = {
-      if( children.isEmpty) Updated(Terminated(ex), notifyParent)
-      else Updated(Cleanup(ex, children), foreach(children)(_.interruptAsync).unit)
+      if( children.isEmpty) Updated(Terminated(ex), notifyParent andThen neverReturn)
+      else Updated(Cleanup(ex, children), foreach(children)(_.interruptAsync).unit andThen neverReturn)
     }
 
-    private def succeedAsync(a: A): IO[Nothing, Unit] =
+    private def succeedAsync(a: A): IO[Nothing, Nothing] =
       state.transact {
         _ match {
           case Running(_, _, children)       => cleanup(Succeed(a), children)
-          case Cleanup(_, _) | Terminated(_) => Observed(unit)
+          case Cleanup(_, _) | Terminated(_) => Observed(neverReturn)
         }
       }
 
-    private def failAsync(e: E): IO[Nothing, Unit] =
+    private def failAsync(e: E): IO[Nothing, Nothing] =
       state.transact {
         _ match {
           case Running(_, _, children)       => cleanup(Fail(e), children)
-          case Cleanup(_, _) | Terminated(_) => Observed(unit)
+          case Cleanup(_, _) | Terminated(_) => Observed(neverReturn)
         }
       }
   
-    def dieAsync(t: Throwable): IO[Nothing, Unit] =
+    // Methods for the current fiber only:-
+
+    def isAlive = state.poll.running
+
+    def start: IO[Nothing, Unit] = ea.flatMap(succeedAsync).catchAll(failAsync)
+  
+    def dieAsync(t: Throwable): IO[Nothing, Nothing] =
       state.transact {
         _ match {
           case Running(_, _, children)       => cleanup(Die(t), children)
-          case Cleanup(_, _) | Terminated(_) => Observed(unit)
+          case Cleanup(_, _) | Terminated(_) => Observed(neverReturn)
         }
       }
-
-    def interruptAsync: IO[Nothing, Unit] = 
+  
+    def check: IO[Nothing, Unit] =
       state.transact {
         _ match {
-          case Running(false, m, children)   => Updated(Running(true, m, children), unit)
+          case Running(true, 0, children) => cleanup(Interrupt(), children)
           case Running(_, _, _) | Cleanup(_, _) | Terminated(_) => Observed(unit)
         }
       }
-
+  
+    def awaitInterrupt: IO[Nothing, Nothing] = state.transact {
+      _ match {
+        case Running(true, _, children)    => cleanup(Interrupt(), children)
+        case Running(false, _, _)          => Blocked
+        case Terminated(_) | Cleanup(_, _) => Observed(neverReturn)
+      }
+    }
+  
     def mask: IO[Nothing, Unit] = incrMask(+1)
     
     def unmask: IO[Nothing, Unit] = incrMask(-1)
@@ -102,20 +102,29 @@ trait Fibers extends Signature { this: Synchronization =>
         }
       }
 
-    def check: IO[Nothing, Unit] =
+    // Methods for any fiber:-
+
+    def interruptAsync: IO[Nothing, Unit] = 
       state.transact {
         _ match {
-          case Running(true, 0, children) => cleanup(Interrupt(), children)
+          case Running(false, m, children)   => Updated(Running(true, m, children), unit)
           case Running(_, _, _) | Cleanup(_, _) | Terminated(_) => Observed(unit)
         }
       }
-
-    def die(t: Throwable): IO[Nothing, Exit[E, A]] =
+  
+    def fork[E1, A1](ea1: IO[E1, A1]): IO[Nothing, Fiber[E1, A1]] = {
       for {
-        _  <- dieAsync(t)
-        ex <- await
-      }
-      yield ex
+        child <- effectTotal(new Fiber(ea1, Some(this)))
+        _ <- state.transact {
+          _ match {
+            case Running(i, m, children) => Updated(Running(i, m, child :: children), unit)
+            case Cleanup(_, _) | Terminated(_) => Observed(child.interruptAsync)
+          }
+        }
+      } yield child
+    }
+  
+    // Methods for other fibers:-
 
     def interrupt: IO[Nothing, Exit[E, A]] =
       for {
@@ -126,9 +135,8 @@ trait Fibers extends Signature { this: Synchronization =>
 
     private def awaitTx = state.transaction {
       _ match {
-        case Terminated(ex)    => Observed(ex)
-        case Running(_, _, cs) => Blocked
-        case Cleanup(_, cs)    => Blocked
+        case Terminated(ex)                   => Observed(ex)
+        case Running(_, _, _) | Cleanup(_, _) => Blocked
       }
     }
 

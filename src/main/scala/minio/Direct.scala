@@ -7,7 +7,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   type Tail     = minio.Tail[Fiber[Any, Any]]
 
   val ignore: Any => Tail                   = _ => Stop
-  val fiberDie: Throwable => Tail           = t => Access( _.die(t).tail)
+  val fiberDie: Throwable => Tail           = t => Access( _.dieAsync(t).tail)
   val fiberLive: Fiber[Any, Any] => Boolean = _.isAlive
   def shift(tail: Tail): Tail               = Shift(tail, fiberDie)
   def check(tail: Tail): Tail               = Check(fiberLive, tail, Stop)

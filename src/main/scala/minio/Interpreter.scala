@@ -20,7 +20,7 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
       )
 
     def fiberDie(t: Throwable): Unit = 
-      runCPS(true, fiber.die(safex(t)), ignore, ignore).run
+      runCPS(true, fiber.dieAsync(safex(t)), ignore, ignore).run
     
     def recurCPS[E, A](masked: Boolean, ea: IO[E, A], ke: E => Tail, ka: A => Tail): Tail =
       Tail.Continue(() => runCPS(masked, ea, ke, ka))
