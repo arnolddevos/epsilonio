@@ -41,7 +41,7 @@ trait Fibers extends Signature { this: Synchronization =>
 
     private def cleanup(ex: Exit[E, A], children: List[Fiber[Any, Any]]) = {
       if( children.isEmpty) Updated(Terminated(ex), notifyParent andThen neverReturn)
-      else Updated(Cleanup(ex, children), foreach(children)(_.interruptAsync).unit andThen neverReturn)
+      else Updated(Cleanup(ex, children), foreach(children)(_.interruptFork).unit andThen neverReturn)
     }
 
     private def succeedAsync(a: A): IO[Nothing, Nothing] =
@@ -104,7 +104,7 @@ trait Fibers extends Signature { this: Synchronization =>
 
     // Methods for any fiber:-
 
-    def interruptAsync: IO[Nothing, Unit] = 
+    def interruptFork: IO[Nothing, Unit] = 
       state.transact {
         _ match {
           case Running(false, m, children)   => Updated(Running(true, m, children), unit)
@@ -118,7 +118,7 @@ trait Fibers extends Signature { this: Synchronization =>
         _ <- state.transact {
           _ match {
             case Running(i, m, children) => Updated(Running(i, m, child :: children), unit)
-            case Cleanup(_, _) | Terminated(_) => Observed(child.interruptAsync)
+            case Cleanup(_, _) | Terminated(_) => Observed(child.interruptFork)
           }
         }
       } yield child
@@ -128,7 +128,7 @@ trait Fibers extends Signature { this: Synchronization =>
 
     def interrupt: IO[Nothing, Exit[E, A]] =
       for {
-        _  <- interruptAsync
+        _  <- interruptFork
         ex <- await
       }
       yield ex
