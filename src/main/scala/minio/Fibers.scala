@@ -35,7 +35,7 @@ trait Fibers extends Signature { this: Synchronization =>
           _ match {
             case Running            => Updated(Managing(child :: Nil), unit)
             case Managing(children) => Updated(Managing(child :: children.filter(_.isAlive)), unit)
-            case Terminated(_)      => Observed(child.interrupt.unit)
+            case Terminated(_)      => Observed(child.interruptFork)
           }
         }
       } yield child
@@ -46,14 +46,14 @@ trait Fibers extends Signature { this: Synchronization =>
         _ match {
           case Running            => Updated(Terminated(ex), succeed(ex) )
           case Managing(children) => Updated(Terminated(ex), 
-                                        foreach(children)(_.interrupt).as(ex))
+                                        foreach(children)(_.interruptFork).as(ex))
           case Terminated(ex0)    => Observed(succeed(ex0))
         }
       }
 
     def die(t: Throwable): IO[Nothing, Exit[E, A]] = exit(Die(t))
 
-    def interrupt: IO[Nothing, Exit[E, A]] = exit(Interrupt())
+    def interruptFork: IO[Nothing, Unit] = exit(Interrupt()).unit
 
     private def awaitTx = state.transaction {
       _ match {
@@ -85,8 +85,8 @@ trait Fibers extends Signature { this: Synchronization =>
   
       val cleanup =
         for {
-          _  <- this.interrupt
-          _  <- foreach(fbs)(_.interrupt)
+          _  <- this.interruptFork
+          _  <- foreach(fbs)(_.interruptFork)
         }
         yield ()
   

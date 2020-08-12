@@ -36,7 +36,7 @@ object ExampleMain extends App {
     for {
       fb <- sys.start.fork
       _  <- effect(Console.in.readLine)
-      _  <- fb.interrupt
+      _  <- fb.interruptFork
     }
     yield ()
 
