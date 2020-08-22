@@ -138,8 +138,8 @@ object Main extends App {
       def log(a: => A): Unit = buffer += a
     }
 
-    def log[A](a: => A): Tail[TestEnv[A]] = Access(e => Catch(() => e.log(a), stop, stop))
-    def stop: Any => Tail[TestEnv[Nothing]] = _ => Access(e => Catch(() => e.stop, _ => Stop, _ => Stop))
+    def log[A](a: => A): Tail[TestEnv[A]] = Access(e => Effect(() => e.log(a), stop, stop))
+    def stop: Any => Tail[TestEnv[Nothing]] = _ => Access(e => Effect(() => e.stop, _ => Stop, _ => Stop))
 
     def [A](test: Runner).tail(name: String)(a: A)(t: Tail[TestEnv[A]])(p: Buffer[A] => Boolean) =
       test.async(name, trial=a.toString) { 
@@ -149,14 +149,14 @@ object Main extends App {
       }.assert(p)
 
     test.tail("a successful effect")(0) {
-      Access( e => Catch({() => e.log(1); 2}, log, stop))
+      Access( e => Effect({() => e.log(1); 2}, log, stop))
     } {
       case Buffer(0, 1, 2) => true
       case _ => false
     }
 
     test.tail("a throwing effect")(new Throwable()) {
-      Catch(() => throw Exception("expected"), stop, log)
+      Effect(() => throw Exception("expected"), stop, log)
     } {
       case Buffer(_, ex) if ex.getMessage == "expected" => true
       case _ => false
@@ -191,21 +191,21 @@ object Main extends App {
     }
 
     test.tail("fork an effect")(0) {
-      Access(e => Fork(Provide(e, log(1)), log(2)))
+      Access(e => Push(Provide(e, log(1)), log(2)))
     } {
       case Buffer(0, 1, 2) => true
       case _ => false
     }
 
     test.tail("shift an effect to another thread")(tid()) {
-      Access( e => Catch(() => e.log(tid()), _ => Shift(log(tid()), stop), stop))
+      Access( e => Effect(() => e.log(tid()), _ => Shift(log(tid()), stop), stop))
     } {
       case Buffer(_, t2, t3) if t2 != t3 => true
       case _ => false
     }
 
     test.tail("a blocking effect (5ms)")(0) {
-      Blocking(Catch(() =>Thread.sleep(5), _ => log(1), stop))
+      Blocking(Effect(() =>Thread.sleep(5), _ => log(1), stop))
     } {
       case Buffer(0, 1) => true
       case _ => false     

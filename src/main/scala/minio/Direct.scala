@@ -54,7 +54,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
         check( 
           Access( 
             _.fork(self).eval( ignore, 
-                child => Fork( 
+                child => Push( 
                   Provide(child, shift(child.start.tail)), 
                   ka(child))
             )
@@ -106,19 +106,19 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   }
 
   def effectTotal[A](a: => A) = new IO[Nothing, A] {
-    def eval(ke: Nothing => Tail, ka: A => Tail) = Catch(() => a, ka, fiberDie)
+    def eval(ke: Nothing => Tail, ka: A => Tail) = Effect(() => a, ka, fiberDie)
   }
 
   def effect[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
-      Catch(() => a, ka, kt)
+      Effect(() => a, ka, kt)
   }
 
   def effectBlocking[A](a: => A) = new IO[Throwable, A] {
     def eval(kt: Throwable => Tail, ka: A => Tail) = 
       check( 
         Blocking( 
-          Catch(() => a, 
+          Effect(() => a, 
             a => check(shift(ka(a))), 
             t => shift(kt(t)))))
   }

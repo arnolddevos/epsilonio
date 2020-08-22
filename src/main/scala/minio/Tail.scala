@@ -7,11 +7,11 @@ enum Tail[-A] {
   case Mask(tail: Tail[A])
   case Unmask(tail: Tail[A])
   case Check(live: A => Boolean, tail: Tail[A], alt: Tail[A])
-  case Fork(child: Tail[Any], tail: Tail[A])
+  case Push(child: Tail[A], tail: Tail[A])
   case Async(linkage: (Tail[A] => Unit) => Any)
   case Blocking(tail: Tail[A])
   case Shift(tail: Tail[A], fail: Throwable => Tail[A])
-  case Catch[A, X](effect: () => X, tail: X => Tail[A], recover: Throwable => Tail[A]) extends Tail[A]
+  case Effect[A, X](effect: () => X, tail: X => Tail[A], recover: Throwable => Tail[A]) extends Tail[A]
   case Stop extends Tail[Any]
 
   def contraMap[B](f: B => A): Tail[B] = Access(b => Provide(f(b), this))
@@ -21,7 +21,7 @@ enum Tail[-A] {
   // def check[A1 <: A](live: A1 => Boolean): Tail[A1] = Check(live, this)
   // def shift[A1 <: A](fail: Throwable => Tail[A1]): Tail[A1] = Shift(this, fail)
   // def blocking: Tail[A] = Blocking(this)
-  // def fork(child: Tail[Any]): Tail[A] = Fork(child, this)
+  // def fork(child: Tail[Any]): Tail[A] = Push(child, this)
 }
 
 object Tail {
@@ -62,12 +62,12 @@ object Tail {
         case Unmask(tail)       =>  loop(a, masks-1, tail)
         case Check(live, tail, alt)  
                                 =>  loop(a, masks, if(masks > 0 || live(a)) tail else alt)      
-        case Fork(child, tail)  =>  reenter((): Any, 0, child)
+        case Push(child, tail)  =>  reenter(a, 0, child)
                                     loop(a, masks, tail)
         case Async(linkage)     =>  linkage(reenter(a, masks, _))
         case Blocking(tail)     =>  platform.executeBlocking(reenter(a, masks, tail))
         case Shift(tail, fail)  =>  platform.executeAsync(sandbox(a, masks, tail, fail))
-        case Catch(effect, tail, recover) 
+        case Effect(effect, tail, recover) 
                                 =>  loop(a, masks, attempt(effect()).fold(recover, tail))
         case Stop               => ()
       }
