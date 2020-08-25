@@ -50,7 +50,7 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
 
     def fork: IO[Nothing, Fiber[E, A]] = 
       for {
-        fb <- Sync(_.fiber.fork(this))
+        fb <- Sync(cx => if(cx.isAlive) cx.fiber.fork(this) else never)
         _  <- Sync(cx => Pure(runFiber(fb, cx.platform)))
       }
       yield fb
@@ -66,7 +66,16 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
   import IO._
   import Exit._
 
-  final case class Cx(platform: Platform, fiber: Fiber[Any, Any], mask: Boolean) 
+  final case class Cx(platform: Platform, fiber: Fiber[Any, Any], mask: Boolean) {
+    def masked = copy(mask=true)
+    def isAlive = mask || fiber.isAlive
+    def sandbox[A](effect: => A): IO[Throwable, A] = 
+      try Pure(effect) 
+      catch { 
+        case t if ! platform.fatal(t) => Error(t) 
+        case t => platform.shutdown(t)
+      }
+  }
 
   private def runFiber[E, A](fiber: Fiber[E, A], platform: Platform): Unit = {
 
@@ -86,14 +95,14 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
     @tailrec
     def loop[E, A](cx: Cx, ea: IO[E, A], dx: Int, ke: (E, Int) => Unit, ka: (A, Int) => Unit): Unit = 
       ea match {
-        case Pure(a)   => ka(a, dx)
-        case Error(e)  => ke(e, dx)
-        case Sync(run)  => loop(cx, run(cx), dx, ke, ka)
-        case Async(run) => run(cx, push(cx, _, dx, ke, ka))
+        case Pure(a)        => ka(a, dx)
+        case Error(e)       => ke(e, dx)
+        case Sync(run)      => loop(cx, run(cx), dx, ke, ka)
+        case Async(run)     => run(cx, shift(cx, _, ke, ka))
         case FoldM(x, f, g) => loop(cx, x, dx, 
           (e, dx) => push(cx, f(e), dx, ke, ka), 
           (a, dx) => push(cx, g(a), dx, ke, ka))
-        case Provide(f, ea1) => loop(f(cx), ea1, dx, ke, ka)
+        case Provide(f, ea1)=> loop(f(cx), ea1, dx, ke, ka)
       }
 
     shift(Cx(platform, fiber, false), fiber.start, (_, _) => (), (_, _) => ())
@@ -103,40 +112,23 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
 
   def succeed[A](a: A): IO[Nothing, A] = Pure(a)
   def fail[E](e: E): IO[E, Nothing] = Error(e)
-
-  def effect[A](effect: => A): IO[Throwable, A] = 
-    Sync(cx => 
-      try Pure(effect) 
-      catch { case t if ! cx.platform.fatal(t) => Error(t) }
-    )
-
-  def effectTotal[A](effect: => A): IO[Nothing, A] = 
-    Sync(_ => Pure(effect))
+  def effect[A](effect: => A): IO[Throwable, A] = Sync(_.sandbox(effect))
+  def effectTotal[A](effect: => A): IO[Nothing, A] = Sync(_ => Pure(effect))
 
   def effectBlocking[A](effect: => A): IO[Throwable, A] = 
-    Async((cx, k) => 
-      cx.platform.executeBlocking(
-        try k(
-          try Pure(effect) 
-          catch { case t if ! cx.platform.fatal(t) => Error(t) }
-        )
-        catch { 
-          case t if ! cx.platform.fatal(t) => cx.fiber.die(t)
-          case t => cx.platform.shutdown(t)
-        }
-      )
+    Sync(cx => 
+      if(cx.isAlive) {
+        val ea = cx.platform.executeBlocking(cx.sandbox(effect))
+        if(cx.isAlive) ea
+        else never
+      }
+      else never
     )
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any): IO[E, A] = 
-    Async((cx, k) => 
-      register(ea => 
-        cx.platform.executeAsync(
-          try k(ea)
-          catch {
-            case t if ! cx.platform.fatal(t) => cx.fiber.die(t)
-            case t => cx.platform.shutdown(t)
-          }
-        )
+    Async((cx, k) =>       
+      if(cx.isAlive) register(ea => 
+        if(cx.isAlive) k(ea)
       )
     )
 
@@ -158,12 +150,11 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
       yield b :: bs
     }
 
-  val interrupt: IO[Nothing, Nothing] = Sync(_.fiber.interruptFork.andThen(never))
+  val interrupt: IO[Nothing, Nothing]            = Sync(_.fiber.interruptFork.andThen(never))
   def die(t: => Throwable): IO[Nothing, Nothing] = Sync(_.fiber.die(t).andThen(never))
-  def mask[E, A](ea: IO[E, A]): IO[E, A] = Provide(_.copy(mask=true), ea)
-  val check: IO[Nothing, Unit] = Sync(cx => if(cx.fiber.isAlive) unit else never)
-  val never: IO[Nothing, Nothing] = effectAsync(_ => ())
-
+  def mask[E, A](ea: IO[E, A]): IO[E, A]         = Provide(_.masked, ea)
+  val check: IO[Nothing, Unit] = Async((cx, k)   => if(cx.isAlive) k(unit))
+  val never: IO[Nothing, Nothing] = Async((_, _) => ())
 
   lazy val defaultRuntime = new Runtime( Platform.default, runFiber )
 }
