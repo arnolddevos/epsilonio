@@ -173,10 +173,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       check(shift(ka(())))
   }
 
-  lazy val defaultRuntime = {
-    def runTopLevelFiber(fiber: Fiber[Any, Any], runtime: Runtime) =
-      Tail.run(Provide(fiber, shift(fiber.start.tail)), runtime.platform)
+  private def runFiber(fiber: Fiber[Any, Any], platform: Platform) =
+    Tail.run(Provide(fiber, shift(fiber.start.tail)), platform)
 
-    new Runtime( Platform.default, runTopLevelFiber(_, _))
-  }
+  lazy val defaultRuntime = new Runtime( Platform.default, runFiber)
 }

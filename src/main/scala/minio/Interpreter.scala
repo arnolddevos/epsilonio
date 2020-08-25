@@ -4,11 +4,13 @@ import scala.annotation.tailrec
 
 trait Interpreter extends Signature { this: Structure & Fibers & Synchronization =>
 
-  private def runFiber(fiber: Fiber[Any, Any], rt: Runtime): Unit = {
-    import rt._
+  private def runFiber(fiber: Fiber[Any, Any], platform: Platform): Unit = {
     import platform._
     import IO._
 
+    def safex(t: Throwable): Throwable = 
+      if(platform.fatal(t)) platform.shutdown(t) else t
+  
     val ignore = (_: Any) => Tail.Stop
 
     fiberContinue(false, fiber.start, ignore, ignore)
@@ -70,7 +72,7 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
               true,
               fiber.fork(ea), 
               ignore, 
-              child => { runFiber(child, rt); ka(child) }
+              child => { runFiber(child, platform); ka(child) }
             )
           }
           else Tail.Stop

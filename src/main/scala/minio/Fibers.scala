@@ -168,14 +168,11 @@ trait Fibers extends Signature { this: Synchronization =>
     )
   }
 
-  class Runtime(val platform: Platform, runFiber: (Fiber[Any, Any], Runtime) => Unit) extends RuntimeOps {
-    def safex(t: Throwable): Throwable = 
-      if(platform.fatal(t)) platform.shutdown(t) else t
-  
+  class Runtime(val platform: Platform, runFiber: (Fiber[Any, Any], Platform) => Unit) extends RuntimeOps {
     def unsafeRunAsync[E, A](ea: => IO[E, A])(k: Exit[E, A] => Any): Unit = {
       val fiber = new Fiber(effectSuspendTotal(ea))
       fiber.awaitNow(k)
-      runFiber(fiber, this)
+      runFiber(fiber, platform)
     }
 
     def unsafeRunSync[E, A](ea: => IO[E, A]): Exit[E, A] = {
