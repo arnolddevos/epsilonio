@@ -255,8 +255,8 @@ object Main extends App {
               case _ => 
                 effectTotal(p.success("Nah. Second startup.")).unit
             }
-          case _ => 
-            effectTotal(p.success("Nah. Stopped before start.")).unit
+          case x => 
+            effectTotal(p.success(s"Nah. Stopped before start. $x")).unit
         }
       }
       new Node(sys) {
