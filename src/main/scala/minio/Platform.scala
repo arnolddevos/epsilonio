@@ -4,7 +4,7 @@ trait Platform {
   def fatal(t: Throwable): Boolean
   def shutdown(t: Throwable): Nothing
   def executeAsync(k: => Unit): Unit
-  def executeBlocking(k: => Unit): Unit
+  def executeBlocking[U](k: => U): U
 }
 
 object Platform {
@@ -26,17 +26,18 @@ object Platform {
       def executeAsync(k: => Unit): Unit = 
         pool.execute( new Runnable { def run() = k } )
 
-      def executeBlocking(k: => Unit): Unit = {
+      def executeBlocking[U](k: => U): U = {
+        var u: Option[U] = None
         val blocker =
           new ManagedBlocker {
-            var isReleasable = false
+            def isReleasable = u.isDefined
             def block(): Boolean = {
-              isReleasable = true
-              k
-              true
+              u = Some(k)
+              isReleasable
             }
           }
         managedBlock(blocker)
+        u.get
       }
     }
 }
