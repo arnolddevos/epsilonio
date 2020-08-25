@@ -11,3 +11,9 @@ val api2: Signature & Synchronization & Timing = new
         Fibers with 
         Timing with
         Synchronization {}
+
+val api3: Signature & Synchronization & Timing = new 
+        Simple with 
+        Fibers with 
+        Timing with
+        Synchronization {}
