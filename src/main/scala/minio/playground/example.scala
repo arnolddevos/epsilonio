@@ -1,7 +1,7 @@
 package minio
 package playground
 
-import api2._
+import api3._
 import nodes._
 
 trait ExamplePolicy extends SupervisorT[Any, Any] {

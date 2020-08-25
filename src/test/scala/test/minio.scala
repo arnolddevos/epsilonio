@@ -1,5 +1,5 @@
 package test.minio
-import minio.api2._
+import minio.api3._
 import probably._
 import scala.concurrent._
 import scala.concurrent.duration._

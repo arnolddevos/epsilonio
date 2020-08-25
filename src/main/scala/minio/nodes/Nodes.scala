@@ -1,7 +1,7 @@
 package minio
 package nodes
 
-import api2._
+import api3._
 import scala.concurrent.duration._
 
 /**
