@@ -139,17 +139,16 @@ class System[E, A] {
 
     for {
       fiber <- node.action.fork
-      _     <- status.offer(Started(node, fiber)).fork
+      _     <- status.offer(Started(node, fiber))
       _     <- monitor(fiber).fork
     }
     yield ()
   }
 
-
   def start: IO[Nothing, Unit] = { 
     val visor = supervisor.getOrElse(new Supervisor(this) with AllFail)
     for {
-      _ <- foreach(nodes)(startNode)
+      _ <- foreach(nodes)(startNode).andThen(never).fork
       _ <- visor.action
     }
     yield ()
