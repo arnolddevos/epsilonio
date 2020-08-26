@@ -22,6 +22,7 @@ trait Structure extends Signature {
     case Interrupt()
     case Die(t: () => Throwable)
     case Check() extends IO[Nothing, Unit]
+    case Never()
 
     def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B] = 
       this match {
@@ -110,4 +111,5 @@ trait Structure extends Signature {
   def die(t: => Throwable): IO[Nothing, Nothing] = Die(() => t)
   def mask[E, A](ea: IO[E, A]): IO[E, A] = Mask(ea)
   def check: IO[Nothing, Unit] = Check()
+  def never: IO[Nothing, Nothing] = Never()
 }

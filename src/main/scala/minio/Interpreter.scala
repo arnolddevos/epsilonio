@@ -87,6 +87,9 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
               catch { case t => fiberDie(t) }
             )
           Tail.Stop
+
+        case Never()          =>
+          Tail.Stop
       }
     }
   }

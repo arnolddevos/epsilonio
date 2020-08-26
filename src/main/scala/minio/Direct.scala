@@ -173,6 +173,10 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       check(shift(ka(())))
   }
 
+  def never = new IO[Nothing, Nothing] {
+    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Stop
+  }
+
   private def runFiber(fiber: Fiber[Any, Any], platform: Platform) =
     Tail.run(Provide(fiber, shift(fiber.start.tail)), platform)
 
