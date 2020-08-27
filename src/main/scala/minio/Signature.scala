@@ -56,6 +56,8 @@ trait Signature {
   trait FiberOps[+E, +A] { this: Fiber[E, A] =>
     def join: IO[E, A]
     def await: IO[Nothing, Exit[E, A]]
+    def result: IO[Nothing, Exit[E, A]]
+    def interrupt: IO[Nothing, Exit[E, A]]
     def interruptFork: IO[Nothing, Unit]
     def raceAll[E1 >: E, A1 >: A](fbs: Iterable[Fiber[E1, A1]]): IO[E1, A1]
   }

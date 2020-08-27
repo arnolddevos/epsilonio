@@ -43,28 +43,32 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
           catch { case e => ke(safex(e)) }
 
         case EffectBlocking(a)=> 
-          if( masked || fiber.isAlive ) 
+          if( masked || fiber.isAlive ) {
             executeBlocking(
               try { ka(a()).run } 
               catch { case e => ke(safex(e)).run }
             )
-          Tail.Stop
-
+            Tail.Stop
+          }
+          else runCPS(false, fiber.idle, ignore, ignore)
+          
         case EffectAsync(k)   => 
-          if( masked || fiber.isAlive )
+          if( masked || fiber.isAlive ) {
             k( 
               ea1 => 
-                if( masked || fiber.isAlive ) 
-                  fiberContinue(masked, ea1, ke, ka)
+                if( masked || fiber.isAlive ) fiberContinue(masked, ea1, ke, ka)
+                else fiberContinue(masked, fiber.idle, ke, ka)
             )
-          Tail.Stop
+            Tail.Stop
+          }
+          else runCPS(false, fiber.idle, ignore, ignore)
 
         case Die(t)           => 
           fiberDie(t())
           Tail.Stop
 
         case Interrupt()      => 
-          runCPS(true, fiber.interruptFork, ignore, ignore)
+          runCPS(true, fiber.interruptFork.andThen(fiber.idle), ignore, ignore)
             
         case Fork(ea)         => 
           if( masked || fiber.isAlive ) {
@@ -75,21 +79,23 @@ trait Interpreter extends Signature { this: Structure & Fibers & Synchronization
               child => { runFiber(child, platform); ka(child) }
             )
           }
-          else Tail.Stop
+          else runCPS(false, fiber.idle, ignore, ignore)
 
         case Mask(ea)         =>
           runCPS(true, ea, ke, ka) 
 
         case Check()          =>
-          if( masked || fiber.isAlive ) 
+          if( masked || fiber.isAlive ) {
             executeAsync(
               try { ka(()).run }
               catch { case t => fiberDie(t) }
             )
-          Tail.Stop
+            Tail.Stop
+          }
+          else runCPS(false, fiber.idle, ignore, ignore)
 
         case Never()          =>
-          Tail.Stop
+          runCPS(false, fiber.idle, ignore, ignore)
       }
     }
   }

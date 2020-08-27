@@ -10,7 +10,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
   val fiberDie: Throwable => Tail           = t => Access( _.die(t).tail)
   val fiberLive: Fiber[Any, Any] => Boolean = _.isAlive
   def shift(tail: Tail): Tail               = Shift(tail, fiberDie)
-  def check(tail: Tail): Tail               = Check(fiberLive, tail, Stop)
+  def check(tail: Tail): Tail               = Check(fiberLive, tail, Access(_.idle.tail))
   def lazily(tail: => Tail): Tail           = Access(_ => tail)
 
   abstract class IO[+E, +A] extends IOops[E, A] { self =>
@@ -157,7 +157,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
     }
 
   def interrupt = new IO[Nothing, Nothing] {
-    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access( _.interruptFork.tail )
+    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access( fb => fb.interruptFork.andThen(fb.idle).tail )
   }
 
   def die(t: => Throwable) = new IO[Nothing, Nothing] {
@@ -173,8 +173,8 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       check(shift(ka(())))
   }
 
-  def never = new IO[Nothing, Nothing] {
-    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Stop
+  def never = new IO[Nothing, Nothing]  {
+    def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access(_.idle.tail)
   }
 
   private def runFiber(fiber: Fiber[Any, Any], platform: Platform) =

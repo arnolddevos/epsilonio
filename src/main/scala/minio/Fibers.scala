@@ -4,22 +4,21 @@ trait Fibers extends Signature { this: Synchronization =>
 
   final class Fiber[+E, +A](ea: IO[E, A]) extends FiberOps[E, A] {
 
-    private enum FiberState {
+    private case class State(phase: Phase, children: List[Fiber[Any, Any]])
+
+    private enum Phase {
       case Running
-      case Managing(children: List[Fiber[Any, Any]])
+      case Interrupted
       case Terminated(ex: Exit[E, A])
     }
 
-    import FiberState._
+    import Phase._
     import Exit._
     import Status._
 
-    private val state = new Transactor(Running)
+    private val state = new Transactor(State(Running, Nil))
 
-    def isAlive = state.poll match { 
-      case _: Terminated => false 
-      case _ => true 
-    }
+    def isAlive = state.poll.phase == Running
 
     def start: IO[Nothing, Unit] =
       for {
@@ -33,39 +32,95 @@ trait Fibers extends Signature { this: Synchronization =>
         child <- effectTotal(new Fiber(ea1))
         _ <- state.transact {
           _ match {
-            case Running            => Updated(Managing(child :: Nil), unit)
-            case Managing(children) => Updated(Managing(child :: children.filter(_.isAlive)), unit)
-            case Terminated(_)      => Observed(child.interruptFork)
+            case State(Running, cs) => Updated(State(Running, child :: cs), unit)
+            case _                  => Observed(child.interruptFork)
           }
         }
       } yield child
     }
 
     private def exit(ex: Exit[E, A]): IO[Nothing, Exit[E, A]] =
-      state.transact {
-        _ match {
-          case Running            => Updated(Terminated(ex), succeed(ex) )
-          case Managing(children) => Updated(Terminated(ex), 
-                                        foreach(children)(_.interruptFork).as(ex))
-          case Terminated(ex0)    => Observed(succeed(ex0))
+      state.transact { s0 =>
+        val State(phase, cs) = s0
+        phase match {
+          case Running => 
+            val s1 = State(Terminated(ex), cs)
+            Updated(s1, foreach(cs)(_.interruptFork).as(ex))
+          case Interrupted =>
+            Observed(succeed(Interrupt()))
+          case Terminated(ex0) => 
+            Observed(succeed(ex0))
         }
       }
 
     def die(t: Throwable): IO[Nothing, Exit[E, A]] = exit(Die(t))
 
-    def interruptFork: IO[Nothing, Unit] = exit(Interrupt()).unit
+    def interruptFork: IO[Nothing, Unit] =
+      state.transact { s0 =>
+        val State(phase, cs) = s0
+        phase match {
+          case Running => 
+            val s1 = State(Interrupted, cs)
+            Updated(s1, foreach(cs)(_.interruptFork).as(()))
+          case _ => Observed(unit)
+        }
+      }
 
-    private def awaitTx = state.transaction {
-      _ match {
+    private def resultTx = state.transaction { s0 =>
+      s0.phase match {
         case Terminated(ex) => Observed(ex)
+        case Interrupted    => Observed(Interrupt())
         case _              => Blocked
       }
     }
 
-    def await: IO[Nothing, Exit[E, A]] = state.transactTotal(awaitTx)
+    def result = state.transactTotal(resultTx)
 
-    def awaitNow(k: Exit[E, A] => Any): Unit = state.transactNow(awaitTx)(k)
+    def resultNow = state.transactNow(resultTx)
+
+    private def stop: IO[Nothing, Nothing] = effectAsync(_ => ())
+
+    def idle: IO[Nothing, Nothing] = state.transact { s0 =>
+      val State(phase, cs) = s0
+      phase match {
+        case Running => Blocked
+        case Interrupted => 
+          val s1 = State(Terminated(Interrupt()), cs)
+          Updated(s1, stop)
+        case Terminated(_) => Observed(stop)
+      }
+    }
   
+    private def awaitTx = state.transaction { s0 =>
+      val State(phase, cs) = s0
+      phase match {
+        case Terminated(ex) => Observed((ex, cs))
+        case _              => Blocked
+      }
+    }
+
+    private def disownTx = state.transaction { s0 => 
+      val s1 = State(s0.phase, Nil)
+      Updated(s1, ())
+    }
+
+    def await: IO[Nothing, Exit[E, A]] = 
+      for {
+        s <- state.transactTotal(awaitTx)
+        (ex, cs) = s
+        _ <- foreach(cs)(_.await)
+        _ <- if(cs.nonEmpty) state.transactTotal(disownTx)
+             else unit
+      }
+      yield ex
+
+    def interrupt: IO[Nothing, Exit[E, A]] =
+      for {
+        _  <- interruptFork
+        ex <- await
+      }
+      yield ex
+      
     def join: IO[E, A] =
       for {
         x <- await
@@ -155,7 +210,7 @@ trait Fibers extends Signature { this: Synchronization =>
     )
 
     def register(fb: Fiber[E, A]): IO[Nothing, Unit] = effectTotal(
-      fb.awaitNow( ex => 
+      fb.resultNow( ex => 
         accum.transactNow(signal(ex))(_ => ())
       )
     )
@@ -171,7 +226,7 @@ trait Fibers extends Signature { this: Synchronization =>
   class Runtime(val platform: Platform, runFiber: (Fiber[Any, Any], Platform) => Unit) extends RuntimeOps {
     def unsafeRunAsync[E, A](ea: => IO[E, A])(k: Exit[E, A] => Any): Unit = {
       val fiber = new Fiber(effectSuspendTotal(ea))
-      fiber.awaitNow(k)
+      fiber.resultNow(k)
       runFiber(fiber, platform)
     }
 

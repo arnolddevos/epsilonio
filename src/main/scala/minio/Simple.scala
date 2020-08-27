@@ -50,7 +50,7 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
 
     def fork: IO[Nothing, Fiber[E, A]] = 
       for {
-        fb <- Sync(cx => if(cx.isAlive) cx.fiber.fork(this) else never)
+        fb <- Sync(cx => if(cx.isAlive) cx.fiber.fork(this) else cx.fiber.idle)
         _  <- Sync(cx => Pure(runFiber(fb, cx.platform)))
       }
       yield fb
@@ -127,15 +127,15 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
     Sync(cx => 
       if(cx.isAlive) {
         val ea = cx.block(effect)
-        if(cx.isAlive) ea else never
+        if(cx.isAlive) ea else cx.fiber.idle
       }
-      else never
+      else cx.fiber.idle
     )
 
   def effectAsync[E, A](register: (IO[E, A] => Unit) => Any): IO[E, A] = 
     Async((cx, k) =>       
-      if(cx.isAlive) register(ea => k(if(cx.isAlive) ea else never))
-      else k(never)
+      if(cx.isAlive) register(ea => k(if(cx.isAlive) ea else cx.fiber.idle))
+      else k(cx.fiber.idle)
     )
 
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] =
@@ -156,11 +156,11 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
       yield b :: bs
     }
 
-  val interrupt: IO[Nothing, Nothing]            = Sync(_.fiber.interruptFork.andThen(never))
-  def die(t: => Throwable): IO[Nothing, Nothing] = Sync(_.fiber.die(t).andThen(never))
+  val interrupt: IO[Nothing, Nothing]            = Sync(cx => cx.fiber.interruptFork.andThen(cx.fiber.idle))
+  def die(t: => Throwable): IO[Nothing, Nothing] = Sync(cx => cx.fiber.die(t).andThen(cx.fiber.idle))
   def mask[E, A](ea: IO[E, A]): IO[E, A]         = MapC(_.masked, ea)
-  val check: IO[Nothing, Unit]                   = Async((cx, k) => k(if(cx.isAlive) unit else never))
-  val never: IO[Nothing, Nothing]                = Async((_, _) => ())
+  val check: IO[Nothing, Unit]                   = Sync(cx => if(cx.isAlive) unit else cx.fiber.idle)
+  val never: IO[Nothing, Nothing]                = Sync(_.fiber.idle)
 
   lazy val defaultRuntime = new Runtime( Platform.default, runFiber )
 }
