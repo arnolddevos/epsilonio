@@ -15,7 +15,8 @@ trait Signature {
   def effect[A](effect: => A): IO[Throwable, A]
   def effectTotal[A](effect: => A): IO[Nothing, A]
   def effectBlocking[A](effect: => A): IO[Throwable, A] 
-  def effectAsync[E, A](register: (IO[E, A] => Unit) => Any): IO[E, A]
+  def effectAsync[E, A](run: (IO[E, A] => Unit) => Any): IO[E, A]
+  def effectAsyncMaybe[E, A](run: (IO[E, A] => Unit) => Option[IO[E, A]]): IO[E, A]
 
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A]
   def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A]

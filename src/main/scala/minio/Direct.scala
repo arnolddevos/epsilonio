@@ -136,6 +136,14 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       )
   }
 
+  def effectAsyncMaybe[E, A](run: (IO[E, A] => Unit) => Option[IO[E, A]]): IO[E, A] = 
+    effectAsync(k =>
+      run(k) match {
+        case Some(ea) => k(ea)
+        case None     => ()
+      }
+    )
+
   def flatten[E, A](suspense: IO[E, IO[E, A]]) = new IO[E, A] {
     def eval(ke: E => Tail, ka: A => Tail) =
       suspense.eval(ke, ea => ea.eval(ke, ka))

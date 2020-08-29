@@ -97,6 +97,14 @@ trait Structure extends Signature {
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] = suspense.flatMap(ea => ea)
   def effectSuspend[A](suspense: => IO[Throwable, A]): IO[Throwable, A] = flatten(effect(suspense))
   def effectSuspendTotal[E, A](suspense: => IO[E, A]): IO[E, A] = EffectSuspend(() => suspense)
+
+  def effectAsyncMaybe[E, A](run: (IO[E, A] => Unit) => Option[IO[E, A]]): IO[E, A] = 
+    effectAsync(k =>
+      run(k) match {
+        case Some(ea) => k(ea)
+        case None     => ()
+      }
+    )
   
   def foreach[E, A, B](as: Iterable[A])(f: A => IO[E, B]): IO[E, List[B]] =
     as.foldRight[IO[E, List[B]]](succeed(Nil)) { (a, ebs) => 

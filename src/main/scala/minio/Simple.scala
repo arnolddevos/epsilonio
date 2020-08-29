@@ -58,7 +58,7 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
     case Pure(a: A)
     case Error(e: E)
     case Sync(run: Context => IO[E, A])
-    case Async(run: (Context, IO[E, A] => Unit) => Unit)
+    case Async(run: (Context, IO[E, A] => Unit) => Option[IO[E, A]])
     case FoldM[E1, A1, E2, A2](ea: IO[E1, A1], f: E1 => IO[E2, A2], g: A1 => IO[E2, A2]) extends IO[E2, A2]
     case MapC(f: Context => Context, ea: IO[E, A])
   }
@@ -106,7 +106,11 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
         case Pure(a)          => ka(a, dx)
         case Error(e)         => ke(e, dx)
         case Sync(run)        => loop(cx, run(cx), dx, ke, ka)
-        case Async(run)       => run(cx, shift(cx, _, ke, ka))
+        case Async(run)       => 
+          run(cx, shift(cx, _, ke, ka)) match {
+            case Some(ea) => loop(cx, ea, dx, ke, ka)
+            case None     => ()
+          }
         case FoldM(ea1, f, g) => loop(cx, ea1, dx, 
           (e, dx) => push(cx, f(e), dx, ke, ka), 
           (a, dx) => push(cx, g(a), dx, ke, ka))
@@ -132,12 +136,16 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
       else cx.fiber.idle
     )
 
-  def effectAsync[E, A](register: (IO[E, A] => Unit) => Any): IO[E, A] = 
-    Async((cx, k) =>       
-      if(cx.isAlive) register(ea => k(if(cx.isAlive) ea else cx.fiber.idle))
+  def effectAsync[E, A](run: (IO[E, A] => Unit) => Any): IO[E, A] = 
+    Async { (cx, k) =>       
+      if(cx.isAlive) run(ea => k(if(cx.isAlive) ea else cx.fiber.idle))
       else k(cx.fiber.idle)
-    )
+      None
+    }
 
+  def effectAsyncMaybe[E, A](run: (IO[E, A] => Unit) => Option[IO[E, A]]): IO[E, A] = 
+    Async((cx, k) => run(ea => k(if(cx.isAlive) ea else cx.fiber.idle)))
+      
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] =
       suspense.flatMap(identity)
 
