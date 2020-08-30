@@ -78,7 +78,7 @@ trait Fibers extends Signature { this: Synchronization =>
 
     def resultNow = state.transactNow(resultTx)
 
-    private def stop: IO[Nothing, Nothing] = effectAsync(_ => ())
+    private def stop: IO[Nothing, Nothing] = mask(effectAsync(_ => ()))
 
     def idle: IO[Nothing, Nothing] = state.transact { s0 =>
       val State(phase, cs) = s0
