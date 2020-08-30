@@ -5,12 +5,12 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
 
   enum IO[+E, +A] extends IOops[E, A] {
 
-    def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B] = foldM(fail, f)
-    def catchAll[F, A1 >: A](f: E => IO[F, A1]): IO[F, A1] = foldM(f, succeed)
+    def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B] = FlatMap(this, f)
+    def catchAll[F, A1 >: A](f: E => IO[F, A1]): IO[F, A1] = CatchAll(this, f)
     def map[B](f: A => B): IO[E, B] = flatMap(a => succeed(f(a)))
     def mapError[E1](f: E => E1): IO[E1, A] = catchAll(e => fail(f(e)))
     def zip[E1 >: E, B](other: IO[E1, B]): IO[E1, (A, B)] = flatMap(a => other.map(b => (a, b)))
-    def fold[B](f: E => B, g: A => B): IO[Nothing, B] = foldM(e => succeed(f(e)), a => succeed((g(a))))
+    def fold[B](f: E => B, g: A => B): IO[Nothing, B] = map(g).catchAll(e => succeed(f(e)))
 
     def race[E1 >: E, A1 >: A](other: IO[E1, A1]): IO[E1, A1] =
       for {
@@ -46,8 +46,6 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
       }
       yield b
   
-    def foldM[E1, A1](f: E => IO[E1, A1], g: A => IO[E1, A1]): IO[E1, A1] = FoldM(this, f, g)
-
     def fork: IO[Nothing, Fiber[E, A]] = 
       for {
         fb <- Sync(cx => if(cx.isAlive) cx.fiber.fork(this) else cx.fiber.idle)
@@ -59,7 +57,8 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
     case Error(e: E)
     case Sync(run: Context => IO[E, A])
     case Async(run: (Context, IO[E, A] => Unit) => Option[IO[E, A]])
-    case FoldM[E1, A1, E2, A2](ea: IO[E1, A1], f: E1 => IO[E2, A2], g: A1 => IO[E2, A2]) extends IO[E2, A2]
+    case FlatMap[E, A, B](ea: IO[E, A], f: A => IO[E, B]) extends IO[E, B]
+    case CatchAll[E, F, A](ea: IO[E, A], f: E => IO[F, A]) extends IO[F, A]
     case MapC(f: Context => Context, ea: IO[E, A])
   }
 
@@ -111,9 +110,10 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
             case Some(ea) => loop(cx, ea, dx, ke, ka)
             case None     => ()
           }
-        case FoldM(ea1, f, g) => loop(cx, ea1, dx, 
-          (e, dx) => push(cx, f(e), dx, ke, ka), 
-          (a, dx) => push(cx, g(a), dx, ke, ka))
+        case FlatMap(ea1, f) => loop(cx, ea1, dx, ke,
+          (a, dx) => push(cx, f(a), dx, ke, ka))
+        case CatchAll(ea1, f) => loop(cx, ea1, dx, 
+          (e, dx) => push(cx, f(e), dx, ke, ka), ka)
         case MapC(f, ea1)     => loop(f(cx), ea1, dx, ke, ka)
       }
 
