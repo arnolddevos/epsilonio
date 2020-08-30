@@ -19,15 +19,15 @@ trait Synchronization { this: Signature =>
     def transaction[T](tx: S => Status[S, T]): Transaction[S, T] = tx
       
     def transact[E, A](tx: Transaction[S, IO[E, A]]): IO[E, A] = 
-      mask(effectAsync[E, A](k => runJob(Job(tx, k))))
+      mask(effectAsyncMaybe[E, A](k => runTx(tx, k)))
 
     def transactTotal[A](tx: Transaction[S, A]): IO[Nothing, A] =
-      mask(effectAsync[Nothing, A]( k => runJob(Job(tx, a => k(succeed(a))))))
+      mask(effectAsyncMaybe[Nothing, A]( k => runTx(tx, k.compose(succeed)).map(succeed)))
 
     def poll: S = cell.get.state
 
     def transactNow[T](tx: Transaction[S, T])(k: T => Any): Unit =
-      runJob(Job(tx, k))
+      runTx(tx, k).foreach(k)
   
     private trait Job {
       type T 
@@ -48,33 +48,35 @@ trait Synchronization { this: Signature =>
     private val cell = new AtomicReference(Cell(init, Nil))
 
     @tailrec
-    private def runJob(job: Job, pending: List[Job] = Nil): Unit = {
+    private def runTx[T](tx: Transaction[S, T], k: T => Any): Option[T] = {
       val c0 = cell.get
 
-      job.phase1(c0.state) match {
+      tx(c0.state) match {
 
-        case Updated(s, ea) =>  
-          if(cell.compareAndSet(c0, Cell(s, Nil))) { 
-            job.phase2(ea)
-            pending ::: c0.jobs.reverse match {
-              case j :: js => runJob(j, js)
-              case Nil    => ()
-              }
+        case Updated(s, t) =>  
+          if(cell.compareAndSet(c0, Cell(s, Nil))) {
+            runJobs(c0.jobs)
+            Some(t)
           }
-          else runJob(job, pending)
+          else runTx(tx, k)
 
-        case Observed(ea) => 
-          job.phase2(ea)
-          pending match {
-            case j :: js => runJob(j, js)
-            case Nil    => ()
-          }
+        case Observed(t) => Some(t)
 
         case Blocked => 
-          if(cell.compareAndSet(c0, Cell(c0.state, job :: c0.jobs))) ()
-          else runJob(job, pending)
+          if(cell.compareAndSet(c0, Cell(c0.state, Job(tx, k) :: c0.jobs))) None
+          else runTx(tx, k)
       } 
-    }    
+    }
+
+    @tailrec
+    private def runJobs(jobs: List[Job]): Unit = {
+      jobs match {
+        case job :: pending =>
+          runTx(job.phase1, job.phase2).foreach(job.phase2)
+          runJobs(pending)
+        case Nil => ()
+      }
+    }
   }
 
   trait Gate[-A, +B] {
