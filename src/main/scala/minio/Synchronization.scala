@@ -55,7 +55,7 @@ trait Synchronization { this: Signature =>
 
         case Updated(s, t) =>  
           if(cell.compareAndSet(c0, Cell(s, Nil))) {
-            runJobs(c0.jobs)
+            runJobs(c0.jobs.reverse)
             Some(t)
           }
           else runTx(tx, k)
