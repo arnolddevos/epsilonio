@@ -181,7 +181,7 @@ trait Direct extends Signature { this: Fibers with Synchronization =>
       check(shift(ka(())))
   }
 
-  def never = new IO[Nothing, Nothing]  {
+  def idle = new IO[Nothing, Nothing]  {
     def eval(ke: Nothing => Tail, ka: Nothing => Tail) = Access(_.idle.tail)
   }
 

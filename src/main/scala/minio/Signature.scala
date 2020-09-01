@@ -28,7 +28,8 @@ trait Signature {
   def die(t: => Throwable): IO[Nothing, Nothing]
   def mask[E, A](ea: IO[E, A]): IO[E, A]
   def check: IO[Nothing, Unit]
-  def never: IO[Nothing, Nothing]
+  def idle: IO[Nothing, Nothing]
+  def never = idle
 
   trait IOops[+E, +A] { this: IO[E, A] =>
     def flatMap[E1 >: E, B](f: A => IO[E1, B]): IO[E1, B]

@@ -119,5 +119,5 @@ trait Structure extends Signature {
   def die(t: => Throwable): IO[Nothing, Nothing] = Die(() => t)
   def mask[E, A](ea: IO[E, A]): IO[E, A] = Mask(ea)
   def check: IO[Nothing, Unit] = Check()
-  def never: IO[Nothing, Nothing] = Never()
+  def idle: IO[Nothing, Nothing] = Never()
 }

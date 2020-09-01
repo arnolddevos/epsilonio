@@ -148,7 +148,7 @@ class System[E, A] {
   def start: IO[Nothing, Unit] = { 
     val visor = supervisor.getOrElse(new Supervisor(this) with AllFail)
     for {
-      _ <- foreach(nodes)(startNode).andThen(never).fork
+      _ <- foreach(nodes)(startNode).andThen(idle).fork
       _ <- visor.action
     }
     yield ()

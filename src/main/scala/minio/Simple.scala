@@ -168,7 +168,7 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
   def die(t: => Throwable): IO[Nothing, Nothing] = Sync(cx => cx.fiber.die(t).andThen(cx.fiber.idle))
   def mask[E, A](ea: IO[E, A]): IO[E, A]         = MapC(_.masked, ea)
   val check: IO[Nothing, Unit]                   = Sync(cx => if(cx.isAlive) unit else cx.fiber.idle)
-  val never: IO[Nothing, Nothing]                = Sync(_.fiber.idle)
+  val idle: IO[Nothing, Nothing]                = Sync(_.fiber.idle)
 
   lazy val defaultRuntime = new Runtime( Platform.default, runFiber )
 }
