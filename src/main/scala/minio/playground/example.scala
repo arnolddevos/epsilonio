@@ -34,9 +34,8 @@ val snk = new Node(sys) with Input(stage2) with Name("data sink") {
 object ExampleMain extends App {
   val envelope =
     for {
-      fb <- sys.start.fork
+      _  <- sys.start.fork
       _  <- effect(Console.in.readLine)
-      _  <- fb.interruptFork
     }
     yield ()
 
