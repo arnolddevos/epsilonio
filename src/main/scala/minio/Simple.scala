@@ -56,10 +56,11 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
     case Pure(a: A)
     case Error(e: E)
     case Sync(run: Context => IO[E, A])
-    case Async(run: (Context, IO[E, A] => Unit) => Option[IO[E, A]])
+    case Async(run: (Context, IO[E, A] => Unit) => IO[E, A])
     case FlatMap[E, A, B](ea: IO[E, A], f: A => IO[E, B]) extends IO[E, B]
     case CatchAll[E, F, A](ea: IO[E, A], f: E => IO[F, A]) extends IO[F, A]
     case MapC(f: Context => Context, ea: IO[E, A])
+    case Stop
   }
 
   import IO._
@@ -106,15 +107,13 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
         case Error(e)         => ke(e, dx)
         case Sync(run)        => loop(cx, run(cx), dx, ke, ka)
         case Async(run)       => 
-          run(cx, shift(cx, _, ke, ka)) match {
-            case Some(ea) => loop(cx, ea, dx, ke, ka)
-            case None     => ()
-          }
-        case FlatMap(ea1, f) => loop(cx, ea1, dx, ke,
+          loop(cx, run(cx, shift(cx, _, ke, ka)), dx, ke, ka)
+        case FlatMap(ea1, f)  => loop(cx, ea1, dx, ke,
           (a, dx) => push(cx, f(a), dx, ke, ka))
         case CatchAll(ea1, f) => loop(cx, ea1, dx, 
           (e, dx) => push(cx, f(e), dx, ke, ka), ka)
         case MapC(f, ea1)     => loop(f(cx), ea1, dx, ke, ka)
+        case Stop             => ()
       }
 
     shift(Context(platform, fiber, false), fiber.start, (_, _) => (), (_, _) => ())
@@ -140,11 +139,11 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
     Async { (cx, k) =>       
       if(cx.isAlive) run(ea => k(if(cx.isAlive) ea else cx.fiber.idle))
       else k(cx.fiber.idle)
-      None
+      Stop
     }
 
   def effectAsyncMaybe[E, A](run: (IO[E, A] => Unit) => Option[IO[E, A]]): IO[E, A] = 
-    Async((cx, k) => run(ea => k(if(cx.isAlive) ea else cx.fiber.idle)))
+    Async((cx, k) => run(ea => k(if(cx.isAlive) ea else cx.fiber.idle)).getOrElse(Stop))
       
   def flatten[E, A](suspense: IO[E, IO[E, A]]): IO[E, A] =
       suspense.flatMap(identity)
