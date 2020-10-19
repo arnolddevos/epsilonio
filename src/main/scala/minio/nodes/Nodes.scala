@@ -169,12 +169,15 @@ type In  = [A] =>> [G] =>> ConnectIn[G, A]
 * Typeclass for outbound connections from a node.
 */
 trait ConnectOut[-G, -A] {
-  def (g: G).output: A => IO[Nothing, Unit]
+  extension (g: G) def output: A => IO[Nothing, Unit] 
 }
 
 object ConnectOut {
   given gateConnectOut[A] as ConnectOut[Gate[A, Any], A] {
-    def (g: Gate[A, Any]).output = g.offer
+    extension (g: Gate[A, Any]) def output = g.offer
+  }
+  given identityConnectOut[A] as ConnectOut[A => IO[Nothing, Unit], A] {
+    extension (o: A => IO[Nothing, Unit]) def output = o
   }
 }
 
@@ -182,14 +185,14 @@ object ConnectOut {
 * Typeclass for inbound connections to a node.
 */
 trait ConnectIn[-G, +A] {
-  def (g: G).input: IO[Nothing, A]
+  extension (g: G) def input: IO[Nothing, A]
 }
 
 object ConnectIn {
   given gateConnectIn[A] as ConnectIn[Gate[Nothing, A], A] {
-    def (g: Gate[Nothing, A]).input = g.take
+    extension (g: Gate[Nothing, A]) def input = g.take
   }
   given identityConnectIn[A] as ConnectIn[IO[Nothing, A], A] {
-    def (i: IO[Nothing, A]).input = i
+    extension (i: IO[Nothing, A]) def input = i
   }
 }
