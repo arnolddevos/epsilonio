@@ -5,9 +5,34 @@ import scala.concurrent.{Promise, Future, Await}
 import scala.concurrent.duration._
 import scala.collection.immutable.ListMap
 
+/*
+ * A Runner creates tests and accumulates their results. 
+ *
+ * For example: `val test = Runner(); test("addition")(1 + 1).assert(_ == 2)`
+ * Results could be obtained with: `println(test.report.formatted)`
+ *
+ * The syntax `test(name)(action).assert(predicate)` runs a simple test.  Alternatively, 
+ * `test.async(name)(action).assert(predicate)` runs a test on an asynchronous `action` (see 
+ * method `async` below).
+ *
+ * It is convenient to define specialized tests as extensions of `Runner`. For example:
+ * `extension[A](test: Runner) def io(name: String)(ea: IO[A]) = test.async(name) { .... }`
+ * creates a syntax `test.io(name)(effect).assert(predicate)` that would run a  given IO,
+ * collect its result, and inspect it.
+ * 
+ */
 class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
+
+  /**
+   * Create a test called `name` for the expression `action`. 
+   */
   def apply[A](name: String, trial: => String="")(action: => A) = Test(name, () => trial, () => action)
 
+
+  /**
+   * A `Test[A]` wraps an expression of type `A` and give it a `name`.  A test 
+   * is run by its `check` or `assert` methods. The test `predicate` is passed to these.
+   */
   class Test[A](val name: String, trial: () => String, action: () => A) {
 
     def attempt(predicate: A => Boolean): Try[A] = {
@@ -38,14 +63,31 @@ class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
       loop(repeat)
     }
 
+    /**
+    * Evaluate the expression under test and return its result.  
+    * If it raises an exeception re-raise it otherwise evaluate the `predicate`.
+    * As a side effect, record the result.
+    */
     def check(predicate: A => Boolean): A =
       attempt(predicate).get
 
+    /**
+    * Evaluate the expression under test.
+    * If it raises an exeception catch it otherwise evaluate the predicate.
+    * As a side effect, record the result.
+    */
     def assert(predicate: A => Boolean): Unit =
       if(asserts) attempt(predicate)
   }
 
-  def async[A](name: String, trial: => String="", timeout: Duration=10.milli)(action: Promise[A] => Unit) = {
+  /**
+   * Create a test called `name` for an asynchronous effect, `action`.  The action is expected to fullfill a
+   * `Promise[A]` within a given `timeout` or 10 milliseconds. 
+   *
+   * As with a synchronous test, `check(predicate)` will return the result of type `A` 
+   * or throw the `action`s exception.
+   */
+   def async[A](name: String, trial: => String="", timeout: Duration=10.milli)(action: Promise[A] => Unit) = {
     def article = {
       val p = Promise[A]()
       action(p)
@@ -56,7 +98,10 @@ class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
     Test(name, () => trial, () => article)
   }
 
-  def suite(name: String, asserts: Boolean=asserts, repeat: Int=1)(action: Runner => Unit): Unit = {
+  /**
+   * Run a suite of tests. Iterate each test `repeat` times. Include assertion tests if `asserts`.
+   */
+   def suite(name: String, asserts: Boolean=asserts, repeat: Int=1)(action: Runner => Unit): Unit = {
     val report = test(name) {
       val runner = Runner(asserts=asserts, indent=indent+1, repeat=repeat)
       action(runner)
@@ -73,10 +118,16 @@ class Runner(val asserts: Boolean=true, indent: Int=0, repeat: Int=1) { test =>
     results = results.updated(s.name, results.get(s.name).fold(s)(_.merge(s)))
   }
 
-  def report(): Report = Report(results.values.toList)
+  /**
+   * The 
+   */
+   def report(): Report = Report(results.values.toList)
 
 }
 
+/**
+ *  The result of a single attempt of a single test.
+ */
 enum Outcome {
   case Passed
   case Failed(trial: String)
@@ -92,6 +143,9 @@ enum Outcome {
   def failed = ! passed
 }
 
+/**
+ *  The result of one or more attempts at a single test.
+ */
 case class Summary(
   name: String,    // name of the test
   indent: Int,     // nesting depth of the test in suites
@@ -101,7 +155,7 @@ case class Summary(
   tmin: Long,      // minimum of trial durations
   ttot: Long,      // total of trial durations
   tmax: Long,      // maximum of the trial durations
-  outcome: Outcome // the first failure or just `Pass`
+  outcome: Outcome // the first failure or just `Passed`
 ) {
   def merge(other: Summary) =
     Summary(
@@ -121,8 +175,15 @@ case class Summary(
   def max: Double = tmax.toDouble/1000.0
 }
 
+/**
+ *  The results for all attempts of a number of tests .
+ */
 case class Report(results: List[Summary]) {
   def passed = results.forall(_.outcome.passed)
+
+  /**
+   * A formatted listing of these results.
+   */
   def formatted: String = results.map(detail).mkString("\n")
     
   private def detail(s: Summary): String = {

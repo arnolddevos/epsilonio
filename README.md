@@ -44,31 +44,21 @@ See `Signature.scala` for the complete API.
 
 ## Architecture
 
-The API is defined in `trait Signature { ... }`. The idea is that alternative implementations can be tried.   There are two implementations so far.
+The API is defined in `trait Signature { ... }`. The idea is that alternative implementations can be tried.   There are three implementations.
 
 * The `Structure` and `Interpreter` implementation realized in object `api1`. 
 
 * The `Direct` implementation realized in `api2`.
 
-These rely on common modules `Fibers` and `Synchronization`.  
+* The `Simple` implementation realized in `api3`.
 
-### Structure 
+Each implementation defines the principal type `IO[+E, +A]` which represents an effect that may eventually succeed with a value of `A` or fail with a value of `E`. Constructors for `IO` values include `effect` and `effectAsync` and combinators include `flatMap`, `zip` and `race`. 
 
-Defines `IO` and its combinators and constructors.  
+All implementations rely on common modules `Fibers` and `Synchronization`.  
 
-An `enum IO[+E, +A] { ... }` is pure data structure. The computation it represents may eventually succeed with a value of `A` or fail with a value of `E`. Constructors include `effect` and `effectAsync` and combinators include `flatMap`, `zip` and `race`. 
+## Fibers
 
-### Interpreter
-
-Defines the logic to execute an effect data structure. 
-
-### Direct
-
-Defines `IO` and its combinators and constructors directly in terms of a trampoline data structure, `Tail`. An alternative to the foregoing approach.
-
-### Fibers
-
-Defines `Fiber`, `Arbiter` and `Runtime`.
+This module defines `Fiber`, `Arbiter` and `Runtime`.
 
 A `Runtime` provides methods to run effects: `unsafeRunAsync` and `unsafeRunSync`.  It depends on a `Platform` which, in this version, encapsulates a java `ForkJoinPool`. 
 
@@ -78,9 +68,9 @@ Fiber operations include `join`, `await` and `interrupt`.  The semantics are int
 
 Class `Arbiter` is not part of the API. An arbiter manages a group of fibers and provides the `race` operation.  
 
-### Synchronization
+## Synchronization
 
-Defines `Transactor`. 
+This module defines `Transactor`. 
 
 The state of each `Fiber` and `Arbiter` is held in a `Transactor[State]`. This is an asynchronous variable that is modified by atomic `Transaction`s. 
 
@@ -88,4 +78,22 @@ Operations on fibers and arbiters such as `fork`, `join` and `interrupt` are tra
 
 A transaction is modeled as a pure function on state which may return a new state and a result effect. Or it may return the value `Blocked`.  Blocked transactions are retained in the transactor until they can produce an effect.
 
-The transactor provides `transact[E, A](tx: Transaction[State, IO[E, A]]): IO[E, A]`.  This effect embodies the state change and result effect. 
+The transactor provides `transact[E, A](tx: Transaction[State, IO[E, A]]): IO[E, A]`.  This effect embodies the state change and result effect.
+
+## Details
+
+Some more details about the alternative implementations.
+
+### Structure and Interpreter
+
+Module `Structure` defines `IO` as an `enum` with one case for each of the main combinators and  constructors.  Module `Interpreter` provides an interpreter to execute an `IO` value. 
+
+### Direct
+
+Module `Direct` defines `IO` as a class with an abstract method `eval(ke: E => Tail, ka: A => Tail): Tail`. Constructors and combinators implement `eval`.  
+
+`enum Tail` is trampoline data structure with cases for primitive operation such as `shift` execution to another thread and `push` execution in sequence. 
+
+### Simple
+
+Module `Simple` defines `IO` as an enum with a small number of cases underlying the richer set of combinators and contructors in the API.   The interpreter `runFiber` is likewise simple.  No trampoline is used.  Instead, the depth of the stack is tracked and the execution is shifted to a new thread if a limit is exceeded. 
