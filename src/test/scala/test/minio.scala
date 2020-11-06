@@ -10,7 +10,7 @@ object Main extends App {
   val rt = defaultRuntime
   val pl = rt.platform
 
-  def [A, B](test: Runner).io(name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B]) =
+  extension [A, B](test: Runner) def io(name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B]) =
     test(name, trial=s"value=$value"){
       defaultRuntime.unsafeRunSync(article(value)).option
     }.assert {
@@ -141,7 +141,7 @@ object Main extends App {
     def log[A](a: => A): Tail[TestEnv[A]] = Access(e => Effect(() => e.log(a), stop, stop))
     def stop: Any => Tail[TestEnv[Nothing]] = _ => Access(e => Effect(() => e.stop, _ => Stop, _ => Stop))
 
-    def [A](test: Runner).tail(name: String)(a: A)(t: Tail[TestEnv[A]])(p: Buffer[A] => Boolean) =
+    extension [A](test: Runner) def tail(name: String)(a: A)(t: Tail[TestEnv[A]])(p: Buffer[A] => Boolean) =
       test.async(name, trial=a.toString) { 
         (pr: Promise[Buffer[A]]) =>
           val e = TestEnv(Buffer(a), pr)
