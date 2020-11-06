@@ -27,7 +27,7 @@ Here are some of the scala 3 features that might change how we do effects:
 
 ## Usage
 
-In the base directory of a dotty 0.24.0-RC1 project:
+In the base directory of a dotty 0.27.0-RC1 project:
 
 ```sh
 git clone arnolddevos/epsilonio
