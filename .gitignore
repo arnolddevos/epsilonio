@@ -2,7 +2,6 @@
 /project/target/
 /project/project/
 /.bloop/
-/.dotty-ide-artifact
-/.dotty-ide.json
 /attic/
-.vscode/settings.json
+/.vscode/
+/.bsp/

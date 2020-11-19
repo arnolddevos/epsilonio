@@ -1,4 +1,3 @@
-val dottyVersion = "0.27.0-RC1"
 name := "minio"
-scalaVersion := dottyVersion
-version := "0.1.0"
+scalaVersion := "3.0.0-M1"
+version := "0.2.0"

@@ -2,7 +2,7 @@ package minio
 import scala.annotation._
 
 enum Tail[-A] {
-  case Provide(a: A, tail: Tail[A]) extends Tail[Any]
+  case Provide[A](a: A, tail: Tail[A]) extends Tail[Any]
   case Access(tail: A => Tail[A])
   case Mask(tail: Tail[A])
   case Unmask(tail: Tail[A])

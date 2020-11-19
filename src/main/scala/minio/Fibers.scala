@@ -2,21 +2,21 @@ package minio
 
 trait Fibers extends Signature { this: Synchronization =>
 
+  private case class State[+E, +A](phase: Phase[E, A], children: List[Fiber[Any, Any]])
+
+  private enum Phase[+E, +A] {
+    case Running
+    case Interrupted
+    case Terminated(ex: Exit[E, A])
+  }
+
   final class Fiber[+E, +A](ea: IO[E, A]) extends FiberOps[E, A] {
-
-    private case class State(phase: Phase, children: List[Fiber[Any, Any]])
-
-    private enum Phase {
-      case Running
-      case Interrupted
-      case Terminated(ex: Exit[E, A])
-    }
 
     import Phase._
     import Exit._
     import Status._
 
-    private val state = new Transactor(State(Running, Nil))
+    private val state = new Transactor(State[E, A](Running, Nil))
 
     def isAlive = state.poll.phase == Running
 
