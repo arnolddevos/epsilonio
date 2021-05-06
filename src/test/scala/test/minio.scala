@@ -213,13 +213,14 @@ object Main extends App {
   }
 
   test.suite("Node tests", repeat=10){ test =>
+    import minio.nodes
     import minio.nodes._
     import Supervisory._
 
     def run(e: IO[Nothing, Any]) = defaultRuntime.unsafeRunAsync(e)(_ => ())
 
     test.async[Int]("start an isolated node") { p =>
-      val sys = System[Nothing, Unit]
+      val sys = nodes.System[Nothing, Unit]
       new Node(sys) {
         def action = effectTotal(p.success(42)).unit
       }
@@ -229,7 +230,7 @@ object Main extends App {
     }
 
     test.async[String]("pass a message between nodes") { p => 
-      val sys = System[Nothing, Unit]
+      val sys = nodes.System[Nothing, Unit]
       val q1 = queue[String](10)
       new Node(sys) with Output(q1) {
         def action = output("Hello world!")
@@ -243,7 +244,7 @@ object Main extends App {
     }
 
     test.async[String]("start a supervised node", timeout=20.milli) { p =>
-      val sys = System[Throwable, Unit]
+      val sys = nodes.System[Throwable, Unit]
       new Supervisor(sys) {
         def action = react { 
           case Started(n, f) => 
