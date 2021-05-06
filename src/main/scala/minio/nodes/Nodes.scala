@@ -173,12 +173,11 @@ trait ConnectOut[-G, -A] {
 }
 
 object ConnectOut {
-  given gateConnectOut[A] as ConnectOut[Gate[A, Any], A] {
+  given gateConnectOut[A]: ConnectOut[Gate[A, Any], A] with
     extension (g: Gate[A, Any]) def output = g.offer
-  }
-  given identityConnectOut[A] as ConnectOut[A => IO[Nothing, Unit], A] {
+  
+  given identityConnectOut[A]: ConnectOut[A => IO[Nothing, Unit], A] with
     extension (o: A => IO[Nothing, Unit]) def output = o
-  }
 }
 
 /**
@@ -189,10 +188,10 @@ trait ConnectIn[-G, +A] {
 }
 
 object ConnectIn {
-  given gateConnectIn[A] as ConnectIn[Gate[Nothing, A], A] {
+  given gateConnectIn[A]: ConnectIn[Gate[Nothing, A], A] with
     extension (g: Gate[Nothing, A]) def input = g.take
-  }
-  given identityConnectIn[A] as ConnectIn[IO[Nothing, A], A] {
+  
+  given identityConnectIn[A]: ConnectIn[IO[Nothing, A], A] with
     extension (i: IO[Nothing, A]) def input = i
-  }
+  
 }

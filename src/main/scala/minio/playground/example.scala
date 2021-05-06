@@ -13,7 +13,7 @@ trait ExamplePolicy extends SupervisorT[Any, Any] {
   }
 }
 
-val sys = System[Throwable, Unit] 
+val sys = nodes.System[Throwable, Unit] 
 
 val stage1, stage2 = queue[String](10)
 
